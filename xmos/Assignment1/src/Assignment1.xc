@@ -187,6 +187,7 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		}
 		waitMoment();
 	}
+	printf("user finished\n");
 }
 
 //ATTACKER PROCESS... The attacker is controlled by this process attackerAnt,
@@ -232,6 +233,8 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 		moveCounter++;
 		waitMoment();
 	}
+
+	printf("attacker finished\n");
 }
 
 int attackerWins(int attackerAntPos) {
@@ -271,16 +274,19 @@ void controller(chanend fromAttacker, chanend fromUser) {
 					fromAttacker <: MOVE_WIN;
 					// Before we inform userAnt, we should make sure it is not blocking on us.
 					// Use select with a default to only read if input is available.
-					select {
-						case fromUser :> attempt:
-							// Read and dump value.
-							attempt = 100;
-							break;
-						default:
-							// Nothing to read, continue to send.
-							attempt=200;
-							break;
-					}
+//					select {
+//						case fromUser :> attempt:
+//							// Read and dump value
+//							fromUser <: MOVE_WIN;
+//							attempt = 100;
+//							break;
+//						default:
+//							// Nothing to read, continue to send.
+//							attempt=200;
+//							break;
+//					}
+					fromUser :> attempt;
+					// Read and dump value
 					fromUser <: MOVE_WIN;
 					lastReportedAttackerAntPosition = attempt;
 					running = 0;
