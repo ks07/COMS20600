@@ -46,6 +46,9 @@
 #include <stdio.h>
 #include <platform.h>
 
+#define ATK_WINS 16
+#define DEF_WINS 17
+
 out port cled0 = PORT_CLOCKLED_0;
 out port cled1 = PORT_CLOCKLED_1;
 out port cled2 = PORT_CLOCKLED_2;
@@ -81,9 +84,9 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 		while (1) {
 				select {
 					case fromUserAnt :> userAntToDisplay:
-					break;
+						break;
 					case fromAttackerAnt :> attackerAntToDisplay:
-					break;
+						break;
 				}
 				j = 16<<(userAntToDisplay%3);
 				i = 16<<(attackerAntToDisplay%3);
@@ -110,10 +113,25 @@ void playSound(unsigned int wavelength, out port speaker) {
 //READ BUTTONS and send to userAnt
 void buttonListener(in port b, out port spkr, chanend toUserAnt) {
 	int r;
-	while (1) {
-		b when pinsneq(15) :> r; // check if some buttons are pressed
-		playSound(200000,spkr); // play sound
-		toUserAnt <: r; // send button pattern to userAnt
+	int playing = 1;
+	int rcvState = 0;
+	while (playing) {
+
+		select {
+			case toUserAnt :> rcvState:
+				printf("btn rcv: %d\n", rcvState);
+				if (rcvState == ATK_WINS || rcvState == DEF_WINS) {
+					playing = 0;
+				}
+				break;
+			default:
+				//printf("btn snd");
+				// Noop
+				b when pinsneq(15) :> r; // check if some buttons are pressed
+				playSound(200000,spkr); // play sound
+				toUserAnt <: r; // send button pattern to userAnt
+				break;
+		}
 	}
 }
 
@@ -140,9 +158,9 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 	unsigned int userAntPosition = 11; //the current defender position
 	int buttonInput; //the input pattern from the buttonListener
 	unsigned int attemptedAntPosition = 0; //the next attempted defender position after considering button
-	int moveForbidden; //the verdict of the controller if move is allowed
+	int moveForbidden = 0; //the verdict of the controller if move is allowed
 	toVisualiser <: userAntPosition; //show initial position
-	while (1) {
+	while (moveForbidden != ATK_WINS && moveForbidden != DEF_WINS) {
 		fromButtons :> buttonInput;
 		if (buttonInput == 14) attemptedAntPosition = (userAntPosition + 1) % 12;
 		if (buttonInput == 7) attemptedAntPosition = (userAntPosition == 0 ? 11 : userAntPosition - 1);
@@ -156,13 +174,21 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		/////////////////////////////////////////////////////////////
 		toController <: attemptedAntPosition;
 		toController :> moveForbidden;
+		printf("mvforb: %d\n", moveForbidden);
+//		fromButtons <: moveForbidden;
 //		printf("%d ", attemptedAntPosition);
-		if (!moveForbidden) {
+		if (moveForbidden == 0) {
 			userAntPosition = attemptedAntPosition;
 			toVisualiser <: userAntPosition;
 		}
+//		else if (moveForbidden != 1) {
+//			fromButtons <: moveForbidden;
+//		}
 		waitMoment();
 	}
+	fromButtons <: moveForbidden;
+	// Consume acknowledgement before shutdown
+	fromButtons :> moveForbidden;
 }
 
 int attackerWins(int attackerAntPos) {
@@ -186,7 +212,7 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 	int currentDirection = 1; //the current direction the attacker is moving
 	int moveForbidden = 0; //the verdict of the controller if move is allowed
 	toVisualiser <: attackerAntPosition; //show initial position
-	while (1) {
+	while (moveForbidden != ATK_WINS && moveForbidden != DEF_WINS) {
 		////////////////////////////////////////////////////////////
 		//
 		// !!! place your code here for attacker behaviour
@@ -200,16 +226,14 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 		toController <: attemptedAntPosition;
 		toController :> moveForbidden;
 
-		if (moveForbidden) {
+		if (moveForbidden == 1) {
 			currentDirection = !currentDirection;
-		} else {
+		} else if (moveForbidden == 0)  {
 			attackerAntPosition = attemptedAntPosition;
 			toVisualiser <: attackerAntPosition;
-		}
 
-		if (attackerWins(attackerAntPosition)) {
-			while(1) {
-				continue;
+			if (attackerWins(attackerAntPosition)) {
+				toController <: ATK_WINS;
 			}
 		}
 
@@ -227,7 +251,7 @@ void controller(chanend fromAttacker, chanend fromUser) {
 	unsigned int attempt = 0;
 	fromUser :> attempt; //start game when user moves
 	fromUser <: 1; //forbid first move
-	while (1) {
+	while (attempt != ATK_WINS && attempt != DEF_WINS) {
 		select {
 			case fromAttacker :> attempt:
 				/////////////////////////////////////////////////////////////
@@ -235,7 +259,9 @@ void controller(chanend fromAttacker, chanend fromUser) {
 				// !!! place your code here to give permission/deny attacker move or to end game
 				//
 				/////////////////////////////////////////////////////////////
-				if (lastReportedUserAntPosition == attempt) {
+				if (attempt == ATK_WINS) {
+					fromUser <: ATK_WINS;
+				} else if (lastReportedUserAntPosition == attempt) {
 					fromAttacker <: 1;
 				} else {
 					fromAttacker <: 0;
@@ -248,14 +274,16 @@ void controller(chanend fromAttacker, chanend fromUser) {
 				// !!! place your code here to give permission/deny user move
 				//
 				/////////////////////////////////////////////////////////////
-				if (lastReportedAttackerAntPosition == attempt) {
+				if (attempt == DEF_WINS) {
+					fromUser <: DEF_WINS;
+				} else if (lastReportedAttackerAntPosition == attempt) {
 					fromUser <: 1;
 				} else {
 					fromUser <: 0;
 					lastReportedUserAntPosition = attempt;
 				}
-			break;
-				}
+				break;
+		}
 	}
 }
 
