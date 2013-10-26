@@ -46,8 +46,13 @@
 #include <stdio.h>
 #include <platform.h>
 
-#define ATK_WINS 16
-#define DEF_WINS 17
+#define MOVE_OK 0
+#define MOVE_FAIL 1
+#define MOVE_WIN 2
+
+#define BTN_STOP 0
+#define BTN_GO 1
+
 
 out port cled0 = PORT_CLOCKLED_0;
 out port cled1 = PORT_CLOCKLED_1;
@@ -113,27 +118,19 @@ void playSound(unsigned int wavelength, out port speaker) {
 //READ BUTTONS and send to userAnt
 void buttonListener(in port b, out port spkr, chanend toUserAnt) {
 	int r;
-	int playing = 1;
-	int rcvState = 0;
-	while (playing) {
+	int btnState = BTN_GO;
 
-		select {
-			case toUserAnt :> rcvState:
-				printf("btn rcv: %d\n", rcvState);
-				if (rcvState == ATK_WINS || rcvState == DEF_WINS) {
-					playing = 0;
-				}
-				break;
-			default:
-				//printf("btn snd");
-				// Noop
-				b when pinsneq(15) :> r; // check if some buttons are pressed
-				playSound(200000,spkr); // play sound
-				toUserAnt <: r; // send button pattern to userAnt
-				break;
+	while (btnState == BTN_GO) {
+		b when pinsneq(15) :> r; // check if some buttons are pressed
+		playSound(200000,spkr); // play sound
+		toUserAnt <: r; // send button pattern to userAnt
+
+		toUserAnt :> r; // retrieve game state.
+		if (r == BTN_STOP) {
+			// Game is over.
+			btnState = BTN_STOP;
 		}
 	}
-	printf("buttonListener shutting down");
 }
 
 //WAIT function
@@ -159,13 +156,14 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 	unsigned int userAntPosition = 11; //the current defender position
 	int buttonInput; //the input pattern from the buttonListener
 	unsigned int attemptedAntPosition = 0; //the next attempted defender position after considering button
-	int moveForbidden = 0; //the verdict of the controller if move is allowed
+	int moveForbidden; //the verdict of the controller if move is allowed
+	int running = 1;
 	toVisualiser <: userAntPosition; //show initial position
-	while (moveForbidden != ATK_WINS && moveForbidden != DEF_WINS) {
+	while (running) {
 		fromButtons :> buttonInput;
 		if (buttonInput == 14) attemptedAntPosition = (userAntPosition + 1) % 12;
 		if (buttonInput == 7) attemptedAntPosition = (userAntPosition == 0 ? 11 : userAntPosition - 1);
-		attemptedAntPosition = attemptedAntPosition % 12;
+
 		////////////////////////////////////////////////////////////
 		//
 		// !!! place code here for userAnt behaviour
@@ -173,16 +171,67 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		/////////////////////////////////////////////////////////////
 		toController <: attemptedAntPosition;
 		toController :> moveForbidden;
-		if (moveForbidden == 0) {
+
+		if (moveForbidden == MOVE_OK) {
 			userAntPosition = attemptedAntPosition;
 			toVisualiser <: userAntPosition;
+			// Keep going
+			fromButtons <: BTN_GO;
+		} else if (moveForbidden == MOVE_WIN) {
+			// Attacker has won, we should stop and inform buttonListener.
+			fromButtons <: BTN_STOP;
+			running = 0;
+		} else {
+			// Keep going
+			fromButtons <: BTN_GO;
 		}
 		waitMoment();
 	}
-	fromButtons <: moveForbidden;
-	// Consume acknowledgement before shutdown
-	fromButtons :> moveForbidden;
-	printf("userAnt shutting down");
+}
+
+//ATTACKER PROCESS... The attacker is controlled by this process attackerAnt,
+// which has channels to the visualiser and controller
+void attackerAnt(chanend toVisualiser, chanend toController) {
+	int moveCounter = 0; //moves of attacker so far
+	unsigned int attackerAntPosition = 5; //the current attacker position
+	unsigned int attemptedAntPosition; //the next attempted position after considering move direction
+	int currentDirection = 1; //the current direction the attacker is moving
+	int moveForbidden = 0; //the verdict of the controller if move is allowed
+	int run = 1;
+	toVisualiser <: attackerAntPosition; //show initial position
+	while (run) {
+		////////////////////////////////////////////////////////////
+		//
+		// !!! place your code here for attacker behaviour
+		//
+		/////////////////////////////////////////////////////////////
+		if (moveCounter % 31 == 0 || moveCounter % 37 == 0 || moveCounter % 43 == 0) {
+			currentDirection = !currentDirection;
+		}
+
+		attemptedAntPosition = attackerAntPosition + (currentDirection ? 1 : -1);
+		toController <: attemptedAntPosition;
+		toController :> moveForbidden;
+
+		switch (moveForbidden) {
+		case MOVE_FAIL:
+			currentDirection = !currentDirection;
+			break;
+		// Allow switch statements to fall through, i.e. not end with a break statement
+		#pragma fallthrough
+		case MOVE_WIN:
+			// We have won, the game is over, so break out of the loop.
+			run = 0;
+			// Pass over to OK so we update position & view.
+		case MOVE_OK:
+			attackerAntPosition = attemptedAntPosition;
+			toVisualiser <: attackerAntPosition;
+			break;
+		}
+
+		moveCounter++;
+		waitMoment();
+	}
 }
 
 int attackerWins(int attackerAntPos) {
@@ -197,46 +246,6 @@ int attackerWins(int attackerAntPos) {
 	}
 }
 
-//ATTACKER PROCESS... The attacker is controlled by this process attackerAnt,
-// which has channels to the visualiser and controller
-void attackerAnt(chanend toVisualiser, chanend toController) {
-	int moveCounter = 0; //moves of attacker so far
-	unsigned int attackerAntPosition = 5; //the current attacker position
-	unsigned int attemptedAntPosition; //the next attempted position after considering move direction
-	int currentDirection = 1; //the current direction the attacker is moving
-	int moveForbidden = 0; //the verdict of the controller if move is allowed
-	toVisualiser <: attackerAntPosition; //show initial position
-	while (moveForbidden != ATK_WINS && moveForbidden != DEF_WINS) {
-		////////////////////////////////////////////////////////////
-		//
-		// !!! place your code here for attacker behaviour
-		//
-		/////////////////////////////////////////////////////////////
-		if (moveCounter % 31 == 0 || moveCounter % 37 == 0 || moveCounter % 43 == 0) {
-			currentDirection = !currentDirection;
-		}
-
-		attemptedAntPosition = attackerAntPosition + (currentDirection ? 1 : -1);
-		toController <: attemptedAntPosition;
-		toController :> moveForbidden;
-
-		if (moveForbidden == 1) {
-			currentDirection = !currentDirection;
-		} else if (moveForbidden == 0)  {
-			attackerAntPosition = attemptedAntPosition;
-			toVisualiser <: attackerAntPosition;
-
-			if (attackerWins(attackerAntPosition)) {
-				toController <: ATK_WINS;
-			}
-		}
-
-		moveCounter++;
-		waitMoment();
-	}
-	printf("attackerAnt shutting down");
-}
-
 //COLLISION DETECTOR... the controller process responds to “permission-to-move” requests
 // from attackerAnt and userAnt. The process also checks if an attackerAnt
 // has moved to LED positions I, XII and XI.
@@ -244,9 +253,10 @@ void controller(chanend fromAttacker, chanend fromUser) {
 	unsigned int lastReportedUserAntPosition = 11; //position last reported by userAnt
 	unsigned int lastReportedAttackerAntPosition = 5; //position last reported by attackerAnt
 	unsigned int attempt = 0;
+	int running = 1;
 	fromUser :> attempt; //start game when user moves
 	fromUser <: 1; //forbid first move
-	while (attempt != ATK_WINS && attempt != DEF_WINS) {
+	while (running) {
 		select {
 			case fromAttacker :> attempt:
 				/////////////////////////////////////////////////////////////
@@ -254,12 +264,28 @@ void controller(chanend fromAttacker, chanend fromUser) {
 				// !!! place your code here to give permission/deny attacker move or to end game
 				//
 				/////////////////////////////////////////////////////////////
-				if (attempt == ATK_WINS) {
-					fromUser <: ATK_WINS;
-				} else if (lastReportedUserAntPosition == attempt) {
-					fromAttacker <: 1;
+				if (lastReportedUserAntPosition == attempt) {
+					fromAttacker <: MOVE_FAIL;
+				} else if (attackerWins(attempt)) {
+					// Attacker wins, send signals to all processes to shut off.
+					fromAttacker <: MOVE_WIN;
+					// Before we inform userAnt, we should make sure it is not blocking on us.
+					// Use select with a default to only read if input is available.
+					select {
+						case fromUser :> attempt:
+							// Read and dump value.
+							attempt = 100;
+							break;
+						default:
+							// Nothing to read, continue to send.
+							attempt=200;
+							break;
+					}
+					fromUser <: MOVE_WIN;
+					lastReportedAttackerAntPosition = attempt;
+					running = 0;
 				} else {
-					fromAttacker <: 0;
+					fromAttacker <: MOVE_OK;
 					lastReportedAttackerAntPosition = attempt;
 				}
 				break;
@@ -269,18 +295,15 @@ void controller(chanend fromAttacker, chanend fromUser) {
 				// !!! place your code here to give permission/deny user move
 				//
 				/////////////////////////////////////////////////////////////
-				if (attempt == DEF_WINS) {
-					fromUser <: DEF_WINS;
-				} else if (lastReportedAttackerAntPosition == attempt) {
-					fromUser <: 1;
+				if (lastReportedAttackerAntPosition == attempt) {
+					fromUser <: MOVE_FAIL;
 				} else {
-					fromUser <: 0;
+					fromUser <: MOVE_OK;
 					lastReportedUserAntPosition = attempt;
 				}
 				break;
 		}
 	}
-	printf("controller shutting down");
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the processes
