@@ -1,0 +1,23 @@
+!SESSION 2013-10-26 18:43:55.493 -----------------------------------------------
+eclipse.buildId=I20080702-1800
+java.version=1.7.0_45
+java.vendor=Oracle Corporation
+BootLoader constants: OS=win32, ARCH=x86, WS=win32, NL=en_GB
+Command-line arguments:  -os win32 -ws win32 -arch x86
+
+!ENTRY org.eclipse.ui 4 4 2013-10-26 18:44:17.503
+!MESSAGE Referenced part does not exist yet: org.eclipse.jdt.ui.PackageExplorer.
+!SESSION 2013-10-26 18:48:37.797 -----------------------------------------------
+eclipse.buildId=I20080702-1800
+java.version=1.7.0_45
+java.vendor=Oracle Corporation
+BootLoader constants: OS=win32, ARCH=x86, WS=win32, NL=en_GB
+Command-line arguments:  -os win32 -ws win32 -arch x86 -data D:\Dev\COMS20600\xmos
+
+!ENTRY org.eclipse.ui 4 4 2013-10-26 18:48:41.517
+!MESSAGE Referenced part does not exist yet: org.eclipse.jdt.ui.PackageExplorer.
+
+!ENTRY org.eclipse.cdt.core 4 0 2013-10-26 18:53:07.112
+!MESSAGE Could not write file: D:\Dev\COMS20600\xmos\Assignment1\.cproject.
+** Error occured because of file status <hidden>.
+** This status is disabled now, to allow writing.
