@@ -133,6 +133,7 @@ void buttonListener(in port b, out port spkr, chanend toUserAnt) {
 				break;
 		}
 	}
+	printf("buttonListener shutting down");
 }
 
 //WAIT function
@@ -164,9 +165,7 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		fromButtons :> buttonInput;
 		if (buttonInput == 14) attemptedAntPosition = (userAntPosition + 1) % 12;
 		if (buttonInput == 7) attemptedAntPosition = (userAntPosition == 0 ? 11 : userAntPosition - 1);
-//		printf("%d ", attemptedAntPosition);
 		attemptedAntPosition = attemptedAntPosition % 12;
-//		printf("%d\n", attemptedAntPosition);
 		////////////////////////////////////////////////////////////
 		//
 		// !!! place code here for userAnt behaviour
@@ -174,21 +173,16 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		/////////////////////////////////////////////////////////////
 		toController <: attemptedAntPosition;
 		toController :> moveForbidden;
-		printf("mvforb: %d\n", moveForbidden);
-//		fromButtons <: moveForbidden;
-//		printf("%d ", attemptedAntPosition);
 		if (moveForbidden == 0) {
 			userAntPosition = attemptedAntPosition;
 			toVisualiser <: userAntPosition;
 		}
-//		else if (moveForbidden != 1) {
-//			fromButtons <: moveForbidden;
-//		}
 		waitMoment();
 	}
 	fromButtons <: moveForbidden;
 	// Consume acknowledgement before shutdown
 	fromButtons :> moveForbidden;
+	printf("userAnt shutting down");
 }
 
 int attackerWins(int attackerAntPos) {
@@ -240,6 +234,7 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 		moveCounter++;
 		waitMoment();
 	}
+	printf("attackerAnt shutting down");
 }
 
 //COLLISION DETECTOR... the controller process responds to “permission-to-move” requests
@@ -285,6 +280,7 @@ void controller(chanend fromAttacker, chanend fromUser) {
 				break;
 		}
 	}
+	printf("controller shutting down");
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the processes
