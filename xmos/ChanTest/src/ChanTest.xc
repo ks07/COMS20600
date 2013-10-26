@@ -9,10 +9,10 @@ void p(chanend other) {
 }
 
 void p2(chanend other) {
-	int read;
+	/*int read;
 	other :> read;
 	other <: 1;
-	printf("p2: %d\n", read);
+	printf("p2: %d\n", read);*/
 }
 
 int main() {
