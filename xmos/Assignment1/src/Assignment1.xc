@@ -76,24 +76,24 @@ int showLED(out port p, chanend fromVisualiser) {
 
 //PROCESS TO COORDINATE DISPLAY of LED Ants
 void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant0, chanend toQuadrant1, chanend
-		toQuadrant2, chanend toQuadrant3) {
-		unsigned int userAntToDisplay = 11;
-		unsigned int attackerAntToDisplay = 5;
-		int i, j;
-		cledR <: 1;
-		while (1) {
-				select {
-					case fromUserAnt :> userAntToDisplay:
-						break;
-					case fromAttackerAnt :> attackerAntToDisplay:
-						break;
-				}
-				j = 16<<(userAntToDisplay%3);
-				i = 16<<(attackerAntToDisplay%3);
-			toQuadrant0 <: (j*(userAntToDisplay/3==0)) + (i*(attackerAntToDisplay/3==0)) ;
-			toQuadrant1 <: (j*(userAntToDisplay/3==1)) + (i*(attackerAntToDisplay/3==1)) ;
-			toQuadrant2 <: (j*(userAntToDisplay/3==2)) + (i*(attackerAntToDisplay/3==2)) ;
-			toQuadrant3 <: (j*(userAntToDisplay/3==3)) + (i*(attackerAntToDisplay/3==3)) ;
+	toQuadrant2, chanend toQuadrant3) {
+	unsigned int userAntToDisplay = 11;
+	unsigned int attackerAntToDisplay = 5;
+	int i, j;
+	cledR <: 1;
+	while (1) {
+		select {
+			case fromUserAnt :> userAntToDisplay:
+				break;
+			case fromAttackerAnt :> attackerAntToDisplay:
+				break;
+		}
+		j = 16<<(userAntToDisplay%3);
+		i = 16<<(attackerAntToDisplay%3);
+		toQuadrant0 <: (j*(userAntToDisplay/3==0)) + (i*(attackerAntToDisplay/3==0)) ;
+		toQuadrant1 <: (j*(userAntToDisplay/3==1)) + (i*(attackerAntToDisplay/3==1)) ;
+		toQuadrant2 <: (j*(userAntToDisplay/3==2)) + (i*(attackerAntToDisplay/3==2)) ;
+		toQuadrant3 <: (j*(userAntToDisplay/3==3)) + (i*(attackerAntToDisplay/3==3)) ;
 	}
 }
 
