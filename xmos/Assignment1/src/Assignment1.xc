@@ -53,6 +53,8 @@
 #define BTN_STOP 0
 #define BTN_GO 1
 
+// Pick a value out of valid position range
+#define VIS_STOP 16
 
 out port cled0 = PORT_CLOCKLED_0;
 out port cled1 = PORT_CLOCKLED_1;
@@ -79,27 +81,69 @@ int showLED(out port p, chanend fromVisualiser) {
 	return 0;
 }
 
+// Displays an arbitrary pattern on LEDs. Takes an array of LEDs to turn on.
+void showPattern(int setOn[], int len, chanend quad0, chanend quad1, chanend quad2, chanend quad3) {
+	int pat0, pat1, pat2, pat3, t0;
+	pat0 = pat1 = pat2 = pat3 = 0;
+
+	for (int i = 0; i < len; i++) {
+		t0 = 16 << (setOn[i] % 3);
+		pat0 = (t0 * ((setOn[i] / 3) == 0)) | pat0;
+		pat1 = (t0 * ((setOn[i] / 3) == 1)) | pat1;
+		pat2 = (t0 * ((setOn[i] / 3) == 2)) | pat2;
+		pat3 = (t0 * ((setOn[i] / 3) == 3)) | pat3;
+	}
+
+	quad0 <: pat0;
+	quad1 <: pat1;
+	quad2 <: pat2;
+	quad3 <: pat3;
+}
+
 //PROCESS TO COORDINATE DISPLAY of LED Ants
 void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant0, chanend toQuadrant1, chanend
 	toQuadrant2, chanend toQuadrant3) {
+	int a,b,c,d;
 	unsigned int userAntToDisplay = 11;
 	unsigned int attackerAntToDisplay = 5;
 	int i, j;
+	int running = 1;
+	timer tmr;
+	unsigned int t;
+	int tarr[2];
 	cledR <: 1;
-	while (1) {
+	while (running) {
 		select {
 			case fromUserAnt :> userAntToDisplay:
 				break;
 			case fromAttackerAnt :> attackerAntToDisplay:
 				break;
 		}
-		j = 16<<(userAntToDisplay%3);
-		i = 16<<(attackerAntToDisplay%3);
-		toQuadrant0 <: (j*(userAntToDisplay/3==0)) + (i*(attackerAntToDisplay/3==0)) ;
-		toQuadrant1 <: (j*(userAntToDisplay/3==1)) + (i*(attackerAntToDisplay/3==1)) ;
-		toQuadrant2 <: (j*(userAntToDisplay/3==2)) + (i*(attackerAntToDisplay/3==2)) ;
-		toQuadrant3 <: (j*(userAntToDisplay/3==3)) + (i*(attackerAntToDisplay/3==3)) ;
+
+		if (userAntToDisplay == VIS_STOP || attackerAntToDisplay == VIS_STOP) {
+			// The game is over, switch off after some time
+			tmr :> t;
+			t += 100000000;
+			tmr when timerafter(t) :> void; // Feed into void to throw away value.
+			toQuadrant0 <: 0;
+			toQuadrant1 <: 0;
+			toQuadrant2 <: 0;
+			toQuadrant3 <: 0;
+
+			running = 0;
+		} else {
+//			j = 16<<(userAntToDisplay%3);
+//			i = 16<<(attackerAntToDisplay%3);
+//			toQuadrant0 <: (j*(userAntToDisplay/3==0)) + (i*(attackerAntToDisplay/3==0)) ;
+//			toQuadrant1 <: (j*(userAntToDisplay/3==1)) + (i*(attackerAntToDisplay/3==1)) ;
+//			toQuadrant2 <: (j*(userAntToDisplay/3==2)) + (i*(attackerAntToDisplay/3==2)) ;
+//			toQuadrant3 <: (j*(userAntToDisplay/3==3)) + (i*(attackerAntToDisplay/3==3)) ;
+			tarr[0] = userAntToDisplay;
+			tarr[1] = attackerAntToDisplay;
+			showPattern(tarr, 2, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+		}
 	}
+	printf("output finished\n");
 }
 
 //PLAYS a short sound (pls use with caution and consideration to other students in the labs!)
@@ -131,6 +175,7 @@ void buttonListener(in port b, out port spkr, chanend toUserAnt) {
 			btnState = BTN_STOP;
 		}
 	}
+	printf("input finished\n");
 }
 
 //WAIT function
@@ -181,6 +226,7 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 			// Attacker has won, we should stop and inform buttonListener.
 			fromButtons <: BTN_STOP;
 			running = 0;
+			toVisualiser <: VIS_STOP;
 		} else {
 			// Keep going
 			fromButtons <: BTN_GO;
@@ -273,18 +319,6 @@ void controller(chanend fromAttacker, chanend fromUser) {
 					// Attacker wins, send signals to all processes to shut off.
 					fromAttacker <: MOVE_WIN;
 					// Before we inform userAnt, we should make sure it is not blocking on us.
-					// Use select with a default to only read if input is available.
-//					select {
-//						case fromUser :> attempt:
-//							// Read and dump value
-//							fromUser <: MOVE_WIN;
-//							attempt = 100;
-//							break;
-//						default:
-//							// Nothing to read, continue to send.
-//							attempt=200;
-//							break;
-//					}
 					fromUser :> attempt;
 					// Read and dump value
 					fromUser <: MOVE_WIN;
@@ -310,6 +344,7 @@ void controller(chanend fromAttacker, chanend fromUser) {
 				break;
 		}
 	}
+	printf("controller finished\n");
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the processes
