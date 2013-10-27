@@ -56,6 +56,9 @@
 // Pick a value out of valid position range
 #define VIS_STOP 16
 
+// Pick a value outside valid LED patterns
+#define LED_STOP 15
+
 out port cled0 = PORT_CLOCKLED_0;
 out port cled1 = PORT_CLOCKLED_1;
 out port cled2 = PORT_CLOCKLED_2;
@@ -74,10 +77,16 @@ out port speaker = PORT_SPEAKER;
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
 int showLED(out port p, chanend fromVisualiser) {
 	unsigned int lightUpPattern;
-	while (1) {
+	int running = 1;
+	while (running) {
 		fromVisualiser :> lightUpPattern; //read LED pattern from visualiser process
-		p <: lightUpPattern; //send pattern to LEDs
+		if (lightUpPattern == LED_STOP) {
+			running = 0;
+		} else {
+			p <: lightUpPattern; //send pattern to LEDs
+		}
 	}
+	printf("LED quad finished\n");
 	return 0;
 }
 
@@ -103,14 +112,13 @@ void showPattern(int setOn[], int len, chanend quad0, chanend quad1, chanend qua
 //PROCESS TO COORDINATE DISPLAY of LED Ants
 void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant0, chanend toQuadrant1, chanend
 	toQuadrant2, chanend toQuadrant3) {
-	int a,b,c,d;
 	unsigned int userAntToDisplay = 11;
 	unsigned int attackerAntToDisplay = 5;
 	int i, j;
 	int running = 1;
 	timer tmr;
 	unsigned int t;
-	int tarr[2];
+	int lights[12];
 	cledR <: 1;
 	while (running) {
 		select {
@@ -121,28 +129,41 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 		}
 
 		if (userAntToDisplay == VIS_STOP || attackerAntToDisplay == VIS_STOP) {
-			// The game is over, switch off after some time
-			tmr :> t;
-			t += 100000000;
-			tmr when timerafter(t) :> void; // Feed into void to throw away value.
-			toQuadrant0 <: 0;
-			toQuadrant1 <: 0;
-			toQuadrant2 <: 0;
-			toQuadrant3 <: 0;
+			// Initialise lights array to turn on all LEDs
+			for (i = 0; i < 12; i++) {
+				lights[i] = i;
+			}
+
+			// Use j to hold toggle
+			j = 0;
+
+			// The game is over, blink LEDs & switch off after some time
+			for (i = 0; i <= 10; i++) {
+				tmr :> t;
+				t += 100000000;
+				tmr when timerafter(t) :> void; // Feed into void to throw away value.
+				showPattern(lights, (j ? 12 : 0), toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+				j = !j;
+			}
 
 			running = 0;
 		} else {
-//			j = 16<<(userAntToDisplay%3);
-//			i = 16<<(attackerAntToDisplay%3);
-//			toQuadrant0 <: (j*(userAntToDisplay/3==0)) + (i*(attackerAntToDisplay/3==0)) ;
-//			toQuadrant1 <: (j*(userAntToDisplay/3==1)) + (i*(attackerAntToDisplay/3==1)) ;
-//			toQuadrant2 <: (j*(userAntToDisplay/3==2)) + (i*(attackerAntToDisplay/3==2)) ;
-//			toQuadrant3 <: (j*(userAntToDisplay/3==3)) + (i*(attackerAntToDisplay/3==3)) ;
-			tarr[0] = userAntToDisplay;
-			tarr[1] = attackerAntToDisplay;
-			showPattern(tarr, 2, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+			j = 16<<(userAntToDisplay%3);
+			i = 16<<(attackerAntToDisplay%3);
+			toQuadrant0 <: (j*(userAntToDisplay/3==0)) + (i*(attackerAntToDisplay/3==0)) ;
+			toQuadrant1 <: (j*(userAntToDisplay/3==1)) + (i*(attackerAntToDisplay/3==1)) ;
+			toQuadrant2 <: (j*(userAntToDisplay/3==2)) + (i*(attackerAntToDisplay/3==2)) ;
+			toQuadrant3 <: (j*(userAntToDisplay/3==3)) + (i*(attackerAntToDisplay/3==3)) ;
+//			tarr[0] = userAntToDisplay;
+//			tarr[1] = attackerAntToDisplay;
+//			showPattern(tarr, 2, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 		}
 	}
+	// Shut off LED processes
+	toQuadrant0 <: LED_STOP;
+	toQuadrant1 <: LED_STOP;
+	toQuadrant2 <: LED_STOP;
+	toQuadrant3 <: LED_STOP;
 	printf("output finished\n");
 }
 
