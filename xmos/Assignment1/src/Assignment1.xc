@@ -187,7 +187,7 @@ void buttonListener(in port b, out port spkr, chanend toUserAnt) {
 
 	while (btnState == BTN_GO) {
 		b when pinsneq(15) :> r; // check if some buttons are pressed
-		playSound(200000,spkr); // play sound
+		playSound(2000000,spkr); // play sound
 		toUserAnt <: r; // send button pattern to userAnt
 
 		toUserAnt :> r; // retrieve game state.
@@ -324,9 +324,13 @@ void controller(chanend fromAttacker, chanend fromUser) {
 	unsigned int lastReportedAttackerAntPosition = 5; //position last reported by attackerAnt
 	unsigned int attempt = 0;
 	int running = 1;
+	timer tmr;
+	unsigned int t, endtime;
 	fromUser :> attempt; //start game when user moves
 	fromUser <: 1; //forbid first move
-	while (running) {
+	tmr :> t;
+	endtime = t + 1000000000; // define when game should end from now
+	while (running && t < endtime) {
 		select {
 			case fromAttacker :> attempt:
 				/////////////////////////////////////////////////////////////
@@ -364,6 +368,8 @@ void controller(chanend fromAttacker, chanend fromUser) {
 				}
 				break;
 		}
+
+		tmr :> t; // Update time value.
 	}
 	printf("controller finished\n");
 }
