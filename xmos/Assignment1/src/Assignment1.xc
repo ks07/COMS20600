@@ -229,7 +229,8 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		fromButtons :> buttonInput;
 		if (buttonInput == 14) attemptedAntPosition = (userAntPosition + 1) % 12;
 		if (buttonInput == 7) attemptedAntPosition = (userAntPosition == 0 ? 11 : userAntPosition - 1);
-
+		if (buttonInput == 11);
+		if (buttonInput == 13);
 		////////////////////////////////////////////////////////////
 		//
 		// !!! place code here for userAnt behaviour
@@ -329,47 +330,58 @@ void controller(chanend fromAttacker, chanend fromUser) {
 	fromUser :> attempt; //start game when user moves
 	fromUser <: 1; //forbid first move
 	tmr :> t;
-	endtime = t + 1000000000; // define when game should end from now
-	while (running && t < endtime) {
-		select {
-			case fromAttacker :> attempt:
-				/////////////////////////////////////////////////////////////
-				//
-				// !!! place your code here to give permission/deny attacker move or to end game
-				//
-				/////////////////////////////////////////////////////////////
-				if (lastReportedUserAntPosition == attempt) {
-					fromAttacker <: MOVE_FAIL;
-				} else if (attackerWins(attempt)) {
-					// Attacker wins, send signals to all processes to shut off.
-					fromAttacker <: MOVE_WIN;
-					// Before we inform userAnt, we should make sure it is not blocking on us.
-					fromUser :> attempt;
-					// Read and dump value
-					fromUser <: MOVE_WIN;
-					lastReportedAttackerAntPosition = attempt;
-					running = 0;
-				} else {
-					fromAttacker <: MOVE_OK;
-					lastReportedAttackerAntPosition = attempt;
-				}
-				break;
-			case fromUser :> attempt:
-				/////////////////////////////////////////////////////////////
-				//
-				// !!! place your code here to give permission/deny user move
-				//
-				/////////////////////////////////////////////////////////////
-				if (lastReportedAttackerAntPosition == attempt) {
-					fromUser <: MOVE_FAIL;
-				} else {
-					fromUser <: MOVE_OK;
-					lastReportedUserAntPosition = attempt;
-				}
-				break;
-		}
+	endtime = t + 10000000; // define when game should end from now
+	while (reset) {
+		while (running) {
+			select {
+				case fromAttacker :> attempt:
+					/////////////////////////////////////////////////////////////
+					//
+					// !!! place your code here to give permission/deny attacker move or to end game
+					//
+					/////////////////////////////////////////////////////////////
+					if (t > endtime) {
+						// User wins, send signals to all processes to shut off.
+						fromAttacker <: MOVE_WIN; // TODO: CHANGE ME
+						// Before we inform userAnt, we should make sure it is not blocking on us.
+						fromUser :> attempt;
+						// Read and dump value
+						fromUser <: MOVE_WIN;
+						lastReportedAttackerAntPosition = attempt;
+						running = 0;
+					} else if (lastReportedUserAntPosition == attempt) {
+						fromAttacker <: MOVE_FAIL;
+					} else if (attackerWins(attempt)) {
+						// Attacker wins, send signals to all processes to shut off.
+						fromAttacker <: MOVE_WIN;
+						// Before we inform userAnt, we should make sure it is not blocking on us.
+						fromUser :> attempt;
+						// Read and dump value
+						fromUser <: MOVE_WIN;
+						lastReportedAttackerAntPosition = attempt;
+						running = 0;
+					} else {
+						fromAttacker <: MOVE_OK;
+						lastReportedAttackerAntPosition = attempt;
+					}
+					break;
+				case fromUser :> attempt:
+					/////////////////////////////////////////////////////////////
+					//
+					// !!! place your code here to give permission/deny user move
+					//
+					/////////////////////////////////////////////////////////////
+					if (lastReportedAttackerAntPosition == attempt) {
+						fromUser <: MOVE_FAIL;
+					} else {
+						fromUser <: MOVE_OK;
+						lastReportedUserAntPosition = attempt;
+					}
+					break;
+			}
 
-		tmr :> t; // Update time value.
+			tmr :> t; // Update time value.
+		}
 	}
 	printf("controller finished\n");
 }
