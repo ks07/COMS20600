@@ -62,6 +62,8 @@
 // Pick a value outside valid LED patterns
 #define LED_STOP 15
 
+#define BNC_WIN 50
+
 // (Un)comment the following line to (hide)/print debug messages.
 //#define DEBUG
 
@@ -92,7 +94,10 @@ int showLED(out port p, chanend fromVisualiser) {
 			p <: lightUpPattern; //send pattern to LEDs
 		}
 	}
+
+	#ifdef DEBUG
 	printf("LED quad finished\n");
+	#endif
 	return 0;
 }
 
@@ -138,12 +143,10 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 
 		if (userAntToDisplay == VIS_STOP) {
 			// userAnt no longer needs our services.
-			printf("user asked to stop vis\n"); // TODO: I get called twice?
 			userRun = 0;
 		}
 		if (attackerAntToDisplay == VIS_STOP) {
 			// attackerAnt no longer needs our services.
-			printf("atk asked to stop vis\n");
 			atkRun = 0;
 		}
 		if (userAntToDisplay < 12 && attackerAntToDisplay < 12){
@@ -153,9 +156,6 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 			toQuadrant1 <: (j*(userAntToDisplay/3==1)) + (i*(attackerAntToDisplay/3==1)) ;
 			toQuadrant2 <: (j*(userAntToDisplay/3==2)) + (i*(attackerAntToDisplay/3==2)) ;
 			toQuadrant3 <: (j*(userAntToDisplay/3==3)) + (i*(attackerAntToDisplay/3==3)) ;
-//			tarr[0] = userAntToDisplay;
-//			tarr[1] = attackerAntToDisplay;
-//			showPattern(tarr, 2, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 		}
 	}
 
@@ -240,14 +240,6 @@ void waitMoment() {
 	waitTime += 10000000;
 	tmr when timerafter(waitTime) :> void;
 }
-
-
-
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// RELEVANT PART OF CODE TO EXPAND FOR YOU
-//
-/////////////////////////////////////////////////////////////////////////////////////////
 
 //DEFENDER PROCESS... The defender is controlled by this process userAnt,
 // which has channels to a buttonListener, visualiser and controller
@@ -340,15 +332,15 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 	int moveResponse; //the verdict of the controller of our position after our attempted move, or game state
 	int run = 1;
 	int isPaused = 0;
-//	toVisualiser <: attackerAntPosition; //show initial position
+
 	while (run) {
 		if (moveCounter % 31 == 0 || moveCounter % 37 == 0 || moveCounter % 43 == 0) {
 			currentDirection = !currentDirection;
 		}
 
 		attemptedAntPosition = attackerAntPosition + (currentDirection ? 1 : -1);
-//		if (!isPaused)
-			toController <: attemptedAntPosition;
+
+		toController <: attemptedAntPosition;
 		toController :> moveResponse;
 		isPaused = 0;
 
@@ -404,11 +396,9 @@ void controller(chanend fromAttacker, chanend fromUser) {
 	unsigned int lastReportedUserAntPosition; //position last reported by userAnt
 	unsigned int lastReportedAttackerAntPosition; //position last reported by attackerAnt
 	unsigned int attempt;
+	unsigned int bounceCnt;
 	int running = 1;
 	int reset = 1;
-	int timeWin = 0;
-	timer tmr;
-	unsigned int t, endtime;
 	while (reset) {
 		// Disregard the attacker's first move, instead tell it to move to starting position.
 		fromAttacker :> attempt;
@@ -418,31 +408,26 @@ void controller(chanend fromAttacker, chanend fromUser) {
 		fromUser :> attempt; //start game when user moves
 		lastReportedUserAntPosition = 11;
 		fromUser <: lastReportedUserAntPosition; //forbid first move
-		tmr :> t;
-		endtime = t + 1000000000; // define when game should end from now
+		bounceCnt = 0;
 
 		while (running) {
 			select {
 				case fromAttacker :> attempt:
-					/////////////////////////////////////////////////////////////
-					//
-					// !!! place your code here to give permission/deny attacker move or to end game
-					//
-					/////////////////////////////////////////////////////////////
-					tmr :> t;
-					if (t > endtime) {
-						// Attacker wins, send signals to all processes to shut off.
-						fromAttacker <: ATK_PAUSE;
-						lastReportedAttackerAntPosition = attempt;
-						// Before we inform userAnt, we should make sure it is not blocking on us.
-						fromUser :> attempt;
-						// Read and dump value
-						fromUser <: MOVE_GAME_OVER;
-						running = 0;
-						timeWin = 1;
-					} else if (lastReportedUserAntPosition == attempt) {
+					if (lastReportedUserAntPosition == attempt) {
+						bounceCnt++;
 						fromAttacker <: lastReportedAttackerAntPosition;
-					} else if (attackerWins(attempt)) {
+					} else if (attackerWins(attempt) || bounceCnt >= BNC_WIN) {
+						if (bounceCnt >= BNC_WIN) {
+							printf("YOU WIN!\n");
+						} else {
+							printf("YOU LOSE!\n");
+						}
+						if (bounceCnt > 0) {
+							printf("You survived %d deflections!\n\n", bounceCnt);
+						} else {
+							printf("\n");
+						}
+
 						// Attacker wins, send signals to all processes to shut off.
 						fromAttacker <: ATK_PAUSE;
 						lastReportedAttackerAntPosition = attempt;
@@ -451,18 +436,12 @@ void controller(chanend fromAttacker, chanend fromUser) {
 						// Read and dump value
 						fromUser <: MOVE_GAME_OVER;
 						running = 0;
-						timeWin = 0;
 					} else {
 						fromAttacker <: attempt;
 						lastReportedAttackerAntPosition = attempt;
 					}
 					break;
 				case fromUser :> attempt:
-					/////////////////////////////////////////////////////////////
-					//
-					// !!! place your code here to give permission/deny user move
-					//
-					/////////////////////////////////////////////////////////////
 					if (lastReportedAttackerAntPosition == attempt) {
 						// Move failed, send user back.
 						fromUser <: lastReportedUserAntPosition;
