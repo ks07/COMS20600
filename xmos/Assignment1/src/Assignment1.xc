@@ -46,12 +46,15 @@
 #include <stdio.h>
 #include <platform.h>
 
-#define MOVE_OK 0
-#define MOVE_FAIL 1
-#define MOVE_WIN 2
+#define MOVE_GAME_OVER 16
+#define ATK_PAUSE 17
 
 #define BTN_STOP 0
 #define BTN_GO 1
+
+// Constants to define ant pos to signify special states.
+#define USR_RESET 16
+#define USR_END 17
 
 // Pick a value out of valid position range
 #define VIS_STOP 16
@@ -90,7 +93,7 @@ int showLED(out port p, chanend fromVisualiser) {
 	return 0;
 }
 
-// Displays an arbitrary pattern on LEDs. Takes an array of LEDs to turn on.
+// Displays an arbitrary pattern on LEDs. Takes an array of active LED numbers.
 void showPattern(int setOn[], int len, chanend quad0, chanend quad1, chanend quad2, chanend quad3) {
 	int pat0, pat1, pat2, pat3, t0;
 	pat0 = pat1 = pat2 = pat3 = 0;
@@ -222,38 +225,69 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 	unsigned int userAntPosition = 11; //the current defender position
 	int buttonInput; //the input pattern from the buttonListener
 	unsigned int attemptedAntPosition = 0; //the next attempted defender position after considering button
-	int moveForbidden; //the verdict of the controller if move is allowed
+	int moveResponse; //the verdict of the controller if move is allowed
 	int running = 1;
+	int waitingReset = 0;
 	toVisualiser <: userAntPosition; //show initial position
 	while (running) {
 		fromButtons :> buttonInput;
-		if (buttonInput == 14) attemptedAntPosition = (userAntPosition + 1) % 12;
-		if (buttonInput == 7) attemptedAntPosition = (userAntPosition == 0 ? 11 : userAntPosition - 1);
-		if (buttonInput == 11);
-		if (buttonInput == 13);
-		////////////////////////////////////////////////////////////
-		//
-		// !!! place code here for userAnt behaviour
-		//
-		/////////////////////////////////////////////////////////////
-		toController <: attemptedAntPosition;
-		toController :> moveForbidden;
 
-		if (moveForbidden == MOVE_OK) {
-			userAntPosition = attemptedAntPosition;
-			toVisualiser <: userAntPosition;
-			// Keep going
-			fromButtons <: BTN_GO;
-		} else if (moveForbidden == MOVE_WIN) {
-			// Attacker has won, we should stop and inform buttonListener.
-			fromButtons <: BTN_STOP;
-			running = 0;
-			toVisualiser <: VIS_STOP;
+		if (waitingReset) {
+			if (buttonInput == 11) {
+				// Centre-Right button
+				printf("btn 11\n");
+				toController <: USR_END;
+				// We want to stop, inform buttonListener/visualiser.
+				fromButtons <: BTN_STOP;
+				running = 0;
+//				toVisualiser <: VIS_STOP; TODO: Inform via attacker
+			} else if (buttonInput == 13) {
+				// Centre-Left button
+				printf("btn 13\n");
+				toController <: USR_RESET;
+				waitingReset = 0;
+				// Reset our position.
+				userAntPosition = 11;
+				toVisualiser <: userAntPosition;
+			} else {
+				printf("No special btn.\n");
+				// If other buttons pressed, skip this input.
+			}
 		} else {
-			// Keep going
-			fromButtons <: BTN_GO;
+			if (buttonInput == 14) {
+				attemptedAntPosition = (userAntPosition + 1) % 12;
+			} else if (buttonInput == 7) {
+				attemptedAntPosition = userAntPosition == 0 ? 11 : userAntPosition - 1;
+			}
+			////////////////////////////////////////////////////////////
+			//
+			// !!! place code here for userAnt behaviour
+			//
+			/////////////////////////////////////////////////////////////
+			toController <: attemptedAntPosition;
+			toController :> moveResponse;
+
+			if (moveResponse == attemptedAntPosition) {
+				// Move was valid, update position.
+				userAntPosition = attemptedAntPosition;
+				toVisualiser <: userAntPosition;
+				// Keep going
+				fromButtons <: BTN_GO;
+			} else if (moveResponse == MOVE_GAME_OVER) {
+				// Current game has ended, wait for a reset or shutdown button to send.
+				waitingReset = 1;
+				fromButtons <: BTN_GO;
+			} else if (moveResponse < 12) {
+				// Move failed, or game just started. Move to given location (usually our previous position).
+				userAntPosition = moveResponse;
+				toVisualiser <: userAntPosition;
+				fromButtons <: BTN_GO; // Buttons should continue.
+			} else {
+				// ASSERTION FAILED!!11!1111!!!
+				printf("WARNING: User received invalid moveResponse (%d)", moveResponse);
+			}
+			waitMoment();
 		}
-		waitMoment();
 	}
 	printf("user finished\n");
 }
@@ -265,37 +299,55 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 	unsigned int attackerAntPosition = 5; //the current attacker position
 	unsigned int attemptedAntPosition; //the next attempted position after considering move direction
 	int currentDirection = 1; //the current direction the attacker is moving
-	int moveForbidden = 0; //the verdict of the controller if move is allowed
+	int moveResponse; //the verdict of the controller of our position after our attempted move, or game state
 	int run = 1;
-	toVisualiser <: attackerAntPosition; //show initial position
+	int isPaused = 0;
+//	toVisualiser <: attackerAntPosition; //show initial position
 	while (run) {
-		////////////////////////////////////////////////////////////
-		//
-		// !!! place your code here for attacker behaviour
-		//
-		/////////////////////////////////////////////////////////////
 		if (moveCounter % 31 == 0 || moveCounter % 37 == 0 || moveCounter % 43 == 0) {
 			currentDirection = !currentDirection;
 		}
 
 		attemptedAntPosition = attackerAntPosition + (currentDirection ? 1 : -1);
-		toController <: attemptedAntPosition;
-		toController :> moveForbidden;
+		if (!isPaused) toController <: attemptedAntPosition;
+		toController :> moveResponse;
+		isPaused = 0;
 
-		switch (moveForbidden) {
-		case MOVE_FAIL:
-			currentDirection = !currentDirection;
-			break;
-		// Allow switch statements to fall through, i.e. not end with a break statement
-		#pragma fallthrough
-		case MOVE_WIN:
-			// We have won, the game is over, so break out of the loop.
-			run = 0;
-			// Pass over to OK so we update position & view.
-		case MOVE_OK:
+//		switch (moveResponse) {
+//			case MOVE_FAIL:
+//				currentDirection = !currentDirection;
+//				break;
+//			// Allow switch statements to fall through, i.e. not end with a break statement
+//			#pragma fallthrough
+//			case MOVE_GAME_OVER:
+//				// We have won, the game is over, so break out of the loop.
+//				run = 0;
+//				// Pass over to OK so we update position & view.
+//			case MOVE_OK:
+//				attackerAntPosition = attemptedAntPosition;
+//				toVisualiser <: attackerAntPosition;
+//				break;
+//		}
+		if (moveResponse == attemptedAntPosition) {
+			// Move was allowed.
 			attackerAntPosition = attemptedAntPosition;
 			toVisualiser <: attackerAntPosition;
-			break;
+		} else if (moveResponse == ATK_PAUSE) {
+			// We win. The game has ended.
+			attackerAntPosition = attemptedAntPosition; // Move to the winning position, so the user can see.
+			toVisualiser <: attackerAntPosition;
+			isPaused = 1;
+		} else if (moveResponse < 12) {
+			// Move failed, or game just started. Move to given location (usually our previous position)
+			currentDirection = !currentDirection; // Has the super fun effect of switching the direction at start of game.
+			attackerAntPosition = moveResponse;
+			toVisualiser <: attackerAntPosition;
+		} else if (moveResponse == MOVE_GAME_OVER) {
+			// After winning, user has chosen to shutdown.
+			run = 0;
+		} else {
+			// ASSERTION FAILED!!11!1111!!!
+			printf("WARNING: Attacker received invalid moveResponse (%d)", moveResponse);
 		}
 
 		moveCounter++;
@@ -321,17 +373,26 @@ int attackerWins(int attackerAntPos) {
 // from attackerAnt and userAnt. The process also checks if an attackerAnt
 // has moved to LED positions I, XII and XI.
 void controller(chanend fromAttacker, chanend fromUser) {
-	unsigned int lastReportedUserAntPosition = 11; //position last reported by userAnt
-	unsigned int lastReportedAttackerAntPosition = 5; //position last reported by attackerAnt
-	unsigned int attempt = 0;
+	unsigned int lastReportedUserAntPosition; //position last reported by userAnt
+	unsigned int lastReportedAttackerAntPosition; //position last reported by attackerAnt
+	unsigned int attempt;
 	int running = 1;
+	int reset = 1;
 	timer tmr;
 	unsigned int t, endtime;
-	fromUser :> attempt; //start game when user moves
-	fromUser <: 1; //forbid first move
-	tmr :> t;
-	endtime = t + 10000000; // define when game should end from now
+	t = 1;
 	while (reset) {
+		// Disregard the attacker's first move, instead tell it to move to starting position.
+		fromAttacker :> attempt;
+		lastReportedAttackerAntPosition = 5;
+		fromAttacker <: lastReportedAttackerAntPosition;
+
+		fromUser :> attempt; //start game when user moves
+		lastReportedUserAntPosition = 11;
+		fromUser <: lastReportedUserAntPosition; //forbid first move
+		//tmr :> t;
+		endtime = t + 1000000000000; // define when game should end from now
+
 		while (running) {
 			select {
 				case fromAttacker :> attempt:
@@ -342,26 +403,25 @@ void controller(chanend fromAttacker, chanend fromUser) {
 					/////////////////////////////////////////////////////////////
 					if (t > endtime) {
 						// User wins, send signals to all processes to shut off.
-						fromAttacker <: MOVE_WIN; // TODO: CHANGE ME
+			//			fromAttacker <: MOVE_GAME_OVER; // TODO: CHANGE ME
 						// Before we inform userAnt, we should make sure it is not blocking on us.
 						fromUser :> attempt;
 						// Read and dump value
-						fromUser <: MOVE_WIN;
-						lastReportedAttackerAntPosition = attempt;
+						fromUser <: MOVE_GAME_OVER;
 						running = 0;
 					} else if (lastReportedUserAntPosition == attempt) {
-						fromAttacker <: MOVE_FAIL;
+						fromAttacker <: lastReportedAttackerAntPosition;
 					} else if (attackerWins(attempt)) {
 						// Attacker wins, send signals to all processes to shut off.
-						fromAttacker <: MOVE_WIN;
+						fromAttacker <: ATK_PAUSE;
+						lastReportedAttackerAntPosition = attempt;
 						// Before we inform userAnt, we should make sure it is not blocking on us.
 						fromUser :> attempt;
 						// Read and dump value
-						fromUser <: MOVE_WIN;
-						lastReportedAttackerAntPosition = attempt;
+						fromUser <: MOVE_GAME_OVER;
 						running = 0;
 					} else {
-						fromAttacker <: MOVE_OK;
+						fromAttacker <: attempt;
 						lastReportedAttackerAntPosition = attempt;
 					}
 					break;
@@ -372,15 +432,36 @@ void controller(chanend fromAttacker, chanend fromUser) {
 					//
 					/////////////////////////////////////////////////////////////
 					if (lastReportedAttackerAntPosition == attempt) {
-						fromUser <: MOVE_FAIL;
+						// Move failed, send user back.
+						fromUser <: lastReportedUserAntPosition;
 					} else {
-						fromUser <: MOVE_OK;
+						// Move ok.
+						fromUser <: attempt;
 						lastReportedUserAntPosition = attempt;
 					}
 					break;
 			}
 
-			tmr :> t; // Update time value.
+			//tmr :> t; // Update time value.
+		}
+
+		// Ask userAnt if we should reset or shutdown.
+		fromUser :> attempt;
+
+		if (attempt == USR_RESET) {
+			reset = 1;
+			// Tell attackerAnt to reset position.
+
+		} else if (attempt == USR_END) {
+			reset = 0;
+			// Attacker wins, send signals to all processes to shut off.
+			fromAttacker <: MOVE_GAME_OVER;
+			// Before we inform userAnt, we should make sure it is not blocking on us.
+			fromUser :> attempt;
+			// Read and dump value
+			fromUser <: MOVE_GAME_OVER;
+
+			// Tell all processes (bar userAnt) to shutdown.
 		}
 	}
 	printf("controller finished\n");
