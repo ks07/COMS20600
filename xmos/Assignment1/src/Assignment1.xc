@@ -120,7 +120,7 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 	toQuadrant2, chanend toQuadrant3) {
 	unsigned int userAntToDisplay = 11;
 	unsigned int attackerAntToDisplay = 5;
-	int i, j;
+	int i, j, c;
 	int userRun = 1;
 	int atkRun = 1;
 	timer tmr;
@@ -168,13 +168,22 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 	// Use j to hold toggle
 	j = 0;
 
+	// Colour toggle
+	c = 0;
+
 	// The game is over, blink LEDs & switch off after some time
-	for (i = 0; i <= 10; i++) {
+	for (i = 0; i <= 8; i++) {
 		tmr :> t;
 		t += 100000000;
 		tmr when timerafter(t) :> void; // Feed into void to throw away value.
 		showPattern(lights, (j ? 12 : 0), toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 		j = !j;
+
+		if (i & 1 == 1) {
+			cledR <: c;
+			c = !c;
+			cledG <: c;
+		}
 	}
 
 	// Shut off LED processes
@@ -228,7 +237,7 @@ void waitMoment() {
 	timer tmr;
 	unsigned int waitTime;
 	tmr :> waitTime;
-	waitTime += 8000000;
+	waitTime += 10000000;
 	tmr when timerafter(waitTime) :> void;
 }
 
@@ -256,7 +265,7 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		if (waitingReset) {
 			if (buttonInput == 11) {
 				// Centre-Right button
-				printf("Shutting down!");
+				printf("Shutting down!\n");
 
 				toController <: USR_END;
 				// We want to stop, inform buttonListener/visualiser.
@@ -265,7 +274,6 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 				toVisualiser <: VIS_STOP;
 			} else if (buttonInput == 13) {
 				// Centre-Left button
-				printf("btn 13\n");
 				fromButtons <: BTN_GO; // Tell buttons to continue.
 				toController <: USR_RESET;
 				waitingReset = 0;
@@ -396,7 +404,6 @@ void controller(chanend fromAttacker, chanend fromUser) {
 	int reset = 1;
 	timer tmr;
 	unsigned int t, endtime;
-	t = 1;
 	while (reset) {
 		// Disregard the attacker's first move, instead tell it to move to starting position.
 		fromAttacker :> attempt;
@@ -406,8 +413,8 @@ void controller(chanend fromAttacker, chanend fromUser) {
 		fromUser :> attempt; //start game when user moves
 		lastReportedUserAntPosition = 11;
 		fromUser <: lastReportedUserAntPosition; //forbid first move
-		//tmr :> t;
-		endtime = t + 1000000000000; // define when game should end from now
+		tmr :> t;
+		endtime = t + 1000000000; // define when game should end from now
 
 		while (running) {
 			select {
@@ -417,15 +424,17 @@ void controller(chanend fromAttacker, chanend fromUser) {
 					// !!! place your code here to give permission/deny attacker move or to end game
 					//
 					/////////////////////////////////////////////////////////////
-					if (t > endtime) {
-						// User wins, send signals to all processes to shut off.
-			//			fromAttacker <: MOVE_GAME_OVER; // TODO: CHANGE ME
+					/*if (t > endtime) {
+						// Attacker wins, send signals to all processes to shut off.
+						fromAttacker <: ATK_PAUSE;
+						lastReportedAttackerAntPosition = attempt;
 						// Before we inform userAnt, we should make sure it is not blocking on us.
 						fromUser :> attempt;
 						// Read and dump value
 						fromUser <: MOVE_GAME_OVER;
 						running = 0;
-					} else if (lastReportedUserAntPosition == attempt) {
+						printf("Time win");
+					} else */ if (lastReportedUserAntPosition == attempt) {
 						fromAttacker <: lastReportedAttackerAntPosition;
 					} else if (attackerWins(attempt)) {
 						// Attacker wins, send signals to all processes to shut off.
@@ -458,7 +467,7 @@ void controller(chanend fromAttacker, chanend fromUser) {
 					break;
 			}
 
-			//tmr :> t; // Update time value.
+			tmr :> t; // Update time value.
 		}
 
 		// Ask userAnt if we should reset or shutdown.
