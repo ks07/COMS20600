@@ -293,34 +293,35 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 			} else {
 				attemptedAntPosition = userAntPosition;
 			}
-			////////////////////////////////////////////////////////////
-			//
-			// !!! place code here for userAnt behaviour
-			//
-			/////////////////////////////////////////////////////////////
-			toController <: attemptedAntPosition;
-			toController :> moveResponse;
 
-			if (moveResponse == attemptedAntPosition) {
-				// Move was valid, update position.
-				userAntPosition = attemptedAntPosition;
-				toVisualiser <: userAntPosition;
-				// Keep going
-				fromButtons <: BTN_GO;
-			} else if (moveResponse == MOVE_GAME_OVER) {
-				// Current game has ended, wait for a reset or shutdown button to send.
-				waitingReset = 1;
-				fromButtons <: BTN_GO;
-			} else if (moveResponse < 12) {
-				// Move failed, or game just started. Move to given location (usually our previous position).
-				userAntPosition = moveResponse;
-				toVisualiser <: userAntPosition;
-				fromButtons <: BTN_GO; // Buttons should continue.
-			} else {
-				// ASSERTION FAILED!!11!1111!!!
-				printf("WARNING: User received invalid moveResponse (%d)", moveResponse);
+			if (buttonInput == 14 || buttonInput == 7) {
+				toController <: attemptedAntPosition;
+				toController :> moveResponse;
+
+				if (moveResponse == attemptedAntPosition) {
+					// Move was valid, update position.
+					userAntPosition = attemptedAntPosition;
+					toVisualiser <: userAntPosition;
+					// Keep going
+					//fromButtons <: BTN_GO;
+				} else if (moveResponse == MOVE_GAME_OVER) {
+					// Current game has ended, wait for a reset or shutdown button to send.
+					waitingReset = 1;
+					//fromButtons <: BTN_GO;
+				} else if (moveResponse < 12) {
+					// Move failed, or game just started. Move to given location (usually our previous position).
+					userAntPosition = moveResponse;
+					toVisualiser <: userAntPosition;
+					//fromButtons <: BTN_GO; // Buttons should continue.
+				} else {
+					// ASSERTION FAILED!!11!1111!!!
+					printf("WARNING: User received invalid moveResponse (%d)", moveResponse);
+				}
 			}
-			waitMoment();
+
+			fromButtons <: BTN_GO;
+
+			//waitMoment();
 		}
 	}
 
@@ -405,6 +406,7 @@ void controller(chanend fromAttacker, chanend fromUser) {
 	unsigned int attempt;
 	int running = 1;
 	int reset = 1;
+	int timeWin = 0;
 	timer tmr;
 	unsigned int t, endtime;
 	while (reset) {
@@ -427,7 +429,8 @@ void controller(chanend fromAttacker, chanend fromUser) {
 					// !!! place your code here to give permission/deny attacker move or to end game
 					//
 					/////////////////////////////////////////////////////////////
-					/*if (t > endtime) {
+					tmr :> t;
+					if (t > endtime) {
 						// Attacker wins, send signals to all processes to shut off.
 						fromAttacker <: ATK_PAUSE;
 						lastReportedAttackerAntPosition = attempt;
@@ -436,8 +439,8 @@ void controller(chanend fromAttacker, chanend fromUser) {
 						// Read and dump value
 						fromUser <: MOVE_GAME_OVER;
 						running = 0;
-						printf("Time win");
-					} else */ if (lastReportedUserAntPosition == attempt) {
+						timeWin = 1;
+					} else if (lastReportedUserAntPosition == attempt) {
 						fromAttacker <: lastReportedAttackerAntPosition;
 					} else if (attackerWins(attempt)) {
 						// Attacker wins, send signals to all processes to shut off.
@@ -448,6 +451,7 @@ void controller(chanend fromAttacker, chanend fromUser) {
 						// Read and dump value
 						fromUser <: MOVE_GAME_OVER;
 						running = 0;
+						timeWin = 0;
 					} else {
 						fromAttacker <: attempt;
 						lastReportedAttackerAntPosition = attempt;
@@ -469,8 +473,6 @@ void controller(chanend fromAttacker, chanend fromUser) {
 					}
 					break;
 			}
-
-			tmr :> t; // Update time value.
 		}
 
 		// Ask userAnt if we should reset or shutdown.
