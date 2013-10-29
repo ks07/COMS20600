@@ -118,12 +118,14 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 	unsigned int userAntToDisplay = 11;
 	unsigned int attackerAntToDisplay = 5;
 	int i, j;
-	int running = 1;
+	int userRun = 1;
+	int atkRun = 1;
 	timer tmr;
 	unsigned int t;
 	int lights[12];
 	cledR <: 1;
-	while (running) {
+	// Only turn off the visualiser when both attacker and user are finished.
+	while (userRun || atkRun) {
 		select {
 			case fromUserAnt :> userAntToDisplay:
 				break;
@@ -131,26 +133,17 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 				break;
 		}
 
-		if (userAntToDisplay == VIS_STOP || attackerAntToDisplay == VIS_STOP) {
-			// Initialise lights array to turn on all LEDs
-			for (i = 0; i < 12; i++) {
-				lights[i] = i;
-			}
-
-			// Use j to hold toggle
-			j = 0;
-
-			// The game is over, blink LEDs & switch off after some time
-			for (i = 0; i <= 10; i++) {
-				tmr :> t;
-				t += 100000000;
-				tmr when timerafter(t) :> void; // Feed into void to throw away value.
-				showPattern(lights, (j ? 12 : 0), toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
-				j = !j;
-			}
-
-			running = 0;
-		} else {
+		if (userAntToDisplay == VIS_STOP) {
+			// userAnt no longer needs our services.
+			printf("user asked to stop vis\n");
+			userRun = 0;
+		}
+		if (attackerAntToDisplay == VIS_STOP) {
+			// attackerAnt no longer needs our services.
+			printf("atk asked to stop vis\n");
+			atkRun = 0;
+		}
+		if (userAntToDisplay < 12 && attackerAntToDisplay < 12){
 			j = 16<<(userAntToDisplay%3);
 			i = 16<<(attackerAntToDisplay%3);
 			toQuadrant0 <: (j*(userAntToDisplay/3==0)) + (i*(attackerAntToDisplay/3==0)) ;
@@ -162,6 +155,25 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 //			showPattern(tarr, 2, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 		}
 	}
+
+	// Flash some lights when shutting down.
+	// Initialise lights array to turn on all LEDs
+	for (i = 0; i < 12; i++) {
+		lights[i] = i;
+	}
+
+	// Use j to hold toggle
+	j = 0;
+
+	// The game is over, blink LEDs & switch off after some time
+	for (i = 0; i <= 10; i++) {
+		tmr :> t;
+		t += 100000000;
+		tmr when timerafter(t) :> void; // Feed into void to throw away value.
+		showPattern(lights, (j ? 12 : 0), toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+		j = !j;
+	}
+
 	// Shut off LED processes
 	toQuadrant0 <: LED_STOP;
 	toQuadrant1 <: LED_STOP;
@@ -240,17 +252,18 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 				// We want to stop, inform buttonListener/visualiser.
 				fromButtons <: BTN_STOP;
 				running = 0;
-//				toVisualiser <: VIS_STOP; TODO: Inform via attacker
+				toVisualiser <: VIS_STOP;
 			} else if (buttonInput == 13) {
 				// Centre-Left button
 				printf("btn 13\n");
+				fromButtons <: BTN_GO; // Tell buttons to continue.
 				toController <: USR_RESET;
 				waitingReset = 0;
 				// Reset our position.
 				userAntPosition = 11;
 				toVisualiser <: userAntPosition;
 			} else {
-				printf("No special btn.\n");
+				fromButtons <: BTN_GO; // Continue
 				// If other buttons pressed, skip this input.
 			}
 		} else {
@@ -354,6 +367,7 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 		waitMoment();
 	}
 
+	toVisualiser <: VIS_STOP;
 	printf("attacker finished\n");
 }
 
@@ -454,14 +468,9 @@ void controller(chanend fromAttacker, chanend fromUser) {
 
 		} else if (attempt == USR_END) {
 			reset = 0;
-			// Attacker wins, send signals to all processes to shut off.
-			fromAttacker <: MOVE_GAME_OVER;
-			// Before we inform userAnt, we should make sure it is not blocking on us.
-			fromUser :> attempt;
-			// Read and dump value
-			fromUser <: MOVE_GAME_OVER;
 
-			// Tell all processes (bar userAnt) to shutdown.
+			// Tell attackerAnt to shutdown.
+			fromAttacker <: MOVE_GAME_OVER;
 		}
 	}
 	printf("controller finished\n");
