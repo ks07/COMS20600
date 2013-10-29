@@ -62,6 +62,9 @@
 // Pick a value outside valid LED patterns
 #define LED_STOP 15
 
+// (Un)comment the following line to (hide)/print debug messages.
+//#define DEBUG
+
 out port cled0 = PORT_CLOCKLED_0;
 out port cled1 = PORT_CLOCKLED_1;
 out port cled2 = PORT_CLOCKLED_2;
@@ -75,7 +78,7 @@ out port speaker = PORT_SPEAKER;
 //
 // Helper Functions provided for you
 //
-/////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////  ////////////////
 
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
 int showLED(out port p, chanend fromVisualiser) {
@@ -135,7 +138,7 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 
 		if (userAntToDisplay == VIS_STOP) {
 			// userAnt no longer needs our services.
-			printf("user asked to stop vis\n");
+			printf("user asked to stop vis\n"); // TODO: I get called twice?
 			userRun = 0;
 		}
 		if (attackerAntToDisplay == VIS_STOP) {
@@ -179,7 +182,10 @@ void visualiser(chanend fromUserAnt, chanend fromAttackerAnt, chanend toQuadrant
 	toQuadrant1 <: LED_STOP;
 	toQuadrant2 <: LED_STOP;
 	toQuadrant3 <: LED_STOP;
+
+	#ifdef DEBUG
 	printf("output finished\n");
+	#endif
 }
 
 //PLAYS a short sound (pls use with caution and consideration to other students in the labs!)
@@ -211,7 +217,10 @@ void buttonListener(in port b, out port spkr, chanend toUserAnt) {
 			btnState = BTN_STOP;
 		}
 	}
+
+	#ifdef DEBUG
 	printf("input finished\n");
+	#endif
 }
 
 //WAIT function
@@ -247,7 +256,8 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		if (waitingReset) {
 			if (buttonInput == 11) {
 				// Centre-Right button
-				printf("btn 11\n");
+				printf("Shutting down!");
+
 				toController <: USR_END;
 				// We want to stop, inform buttonListener/visualiser.
 				fromButtons <: BTN_STOP;
@@ -302,7 +312,10 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 			waitMoment();
 		}
 	}
+
+	#ifdef DEBUG
 	printf("user finished\n");
+	#endif
 }
 
 //ATTACKER PROCESS... The attacker is controlled by this process attackerAnt,
@@ -322,25 +335,11 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 		}
 
 		attemptedAntPosition = attackerAntPosition + (currentDirection ? 1 : -1);
-		if (!isPaused) toController <: attemptedAntPosition;
+//		if (!isPaused)
+			toController <: attemptedAntPosition;
 		toController :> moveResponse;
 		isPaused = 0;
 
-//		switch (moveResponse) {
-//			case MOVE_FAIL:
-//				currentDirection = !currentDirection;
-//				break;
-//			// Allow switch statements to fall through, i.e. not end with a break statement
-//			#pragma fallthrough
-//			case MOVE_GAME_OVER:
-//				// We have won, the game is over, so break out of the loop.
-//				run = 0;
-//				// Pass over to OK so we update position & view.
-//			case MOVE_OK:
-//				attackerAntPosition = attemptedAntPosition;
-//				toVisualiser <: attackerAntPosition;
-//				break;
-//		}
 		if (moveResponse == attemptedAntPosition) {
 			// Move was allowed.
 			attackerAntPosition = attemptedAntPosition;
@@ -368,7 +367,10 @@ void attackerAnt(chanend toVisualiser, chanend toController) {
 	}
 
 	toVisualiser <: VIS_STOP;
+
+	#ifdef DEBUG
 	printf("attacker finished\n");
+	#endif
 }
 
 int attackerWins(int attackerAntPos) {
@@ -464,16 +466,20 @@ void controller(chanend fromAttacker, chanend fromUser) {
 
 		if (attempt == USR_RESET) {
 			reset = 1;
+			running = 1;
 			// Tell attackerAnt to reset position.
 
 		} else if (attempt == USR_END) {
 			reset = 0;
-
 			// Tell attackerAnt to shutdown.
+			fromAttacker :> attempt; //Clear the channel
 			fromAttacker <: MOVE_GAME_OVER;
 		}
 	}
+
+	#ifdef DEBUG
 	printf("controller finished\n");
+	#endif
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the processes
