@@ -279,6 +279,7 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 				waitingReset = 0;
 				// Reset our position.
 				userAntPosition = 11;
+				attemptedAntPosition = 0;
 				toVisualiser <: userAntPosition;
 			} else {
 				fromButtons <: BTN_GO; // Continue
@@ -289,6 +290,8 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 				attemptedAntPosition = (userAntPosition + 1) % 12;
 			} else if (buttonInput == 7) {
 				attemptedAntPosition = userAntPosition == 0 ? 11 : userAntPosition - 1;
+			} else {
+				attemptedAntPosition = userAntPosition;
 			}
 			////////////////////////////////////////////////////////////
 			//
