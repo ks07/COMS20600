@@ -255,6 +255,7 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 		fromButtons :> buttonInput;
 
 		if (waitingReset) {
+			running = 1;
 			if (buttonInput == 11) {
 				// Centre-Right button
 				printf("Shutting down!\n");
@@ -286,7 +287,7 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 				attemptedAntPosition = userAntPosition;
 			}
 
-			if (buttonInput == 14 || buttonInput == 7) {
+			//if (buttonInput == 14 || buttonInput == 7) {
 				toController <: attemptedAntPosition;
 				toController :> moveResponse;
 
@@ -309,7 +310,7 @@ void userAnt(chanend fromButtons, chanend toVisualiser, chanend toController) {
 					// ASSERTION FAILED!!11!1111!!!
 					printf("WARNING: User received invalid moveResponse (%d)", moveResponse);
 				}
-			}
+			//}
 
 			fromButtons <: BTN_GO;
 
@@ -405,9 +406,13 @@ void controller(chanend fromAttacker, chanend fromUser) {
 		lastReportedAttackerAntPosition = 5;
 		fromAttacker <: lastReportedAttackerAntPosition;
 
-		fromUser :> attempt; //start game when user moves
+		attempt = 11;
 		lastReportedUserAntPosition = 11;
-		fromUser <: lastReportedUserAntPosition; //forbid first move
+		while (attempt == 11) {
+			// Only start the game when the user sends us a move, not a bogus "reset"/"end"
+			fromUser :> attempt; //start game when user moves
+			fromUser <: lastReportedUserAntPosition; //forbid first move
+		}
 		bounceCnt = 0;
 
 		while (running) {
@@ -417,6 +422,16 @@ void controller(chanend fromAttacker, chanend fromUser) {
 						bounceCnt++;
 						fromAttacker <: lastReportedAttackerAntPosition;
 					} else if (attackerWins(attempt) || bounceCnt >= BNC_WIN) {
+						// Attacker wins, send signals to all processes to shut off.
+						fromAttacker <: ATK_PAUSE;
+						lastReportedAttackerAntPosition = attempt;
+						// Before we inform userAnt, we should make sure it is not blocking on us.
+						fromUser :> attempt;
+						// Read and dump value
+						fromUser <: MOVE_GAME_OVER;
+						running = 0;
+
+
 						if (bounceCnt >= BNC_WIN) {
 							printf("YOU WIN!\n");
 						} else {
@@ -427,15 +442,6 @@ void controller(chanend fromAttacker, chanend fromUser) {
 						} else {
 							printf("\n");
 						}
-
-						// Attacker wins, send signals to all processes to shut off.
-						fromAttacker <: ATK_PAUSE;
-						lastReportedAttackerAntPosition = attempt;
-						// Before we inform userAnt, we should make sure it is not blocking on us.
-						fromUser :> attempt;
-						// Read and dump value
-						fromUser <: MOVE_GAME_OVER;
-						running = 0;
 					} else {
 						fromAttacker <: attempt;
 						lastReportedAttackerAntPosition = attempt;
