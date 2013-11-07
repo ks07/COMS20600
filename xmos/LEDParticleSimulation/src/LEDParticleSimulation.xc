@@ -18,7 +18,7 @@ in port buttons = PORT_BUTTON;
 out port speaker = PORT_SPEAKER;
 
 #define noParticles 3 //overall number of particles threads in the system
-
+#define moveDenied 0
 
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -129,14 +129,39 @@ void particle(chanend left, chanend right, chanend toVisualiser, int startPositi
 	int leftMoveForbidden = 0; //the verdict of the left neighbour if move is allowed
 	int rightMoveForbidden = 0; //the verdict of the right neighbour if move is allowed
 	int currentVelocity = 1; //the current particle velocity
+	unsigned int attemptedMove;
 	///////////////////////////////////////////////////////////////////////
 	//
 	// ADD YOUR CODE HERE TO SIMULATE PARTICLE BEHAVIOUR
 	//
 	///////////////////////////////////////////////////////////////////////
-	attemptedPosition = position + currentDirection;
+//	attemptedPosition = position + currentDirection;
 	select {
-		left :>
+		case left :> attemptedMove:
+			if (position == attemptedMove) {
+				left <: moveDenied;
+				currentDirection = (currentDirection == 1 ? -1 : 1);
+			}
+		case right :> attemptedMove:
+			if (position == attemptedMove) {
+				right <: moveDenied;
+				currentDirection = (currentDirection == 1 ? -1 : 1);
+			}
+		default:
+			attemptedPosition = position + currentDirection;
+			switch(currentDirection){
+				//Moving to right so sending to left channel
+				case 1:
+					right <: attemptedPosition;
+					right :> rightMoveForbidden;
+					currentDirection = (currentDirection == 1 ? -1 : 1);
+					toVisualiser <: position;
+				case -1:
+					left <: attemptedPosition;
+					left :> leftMoveForbidden;
+					currentDirection = (currentDirection == 1 ? -1 : 1);
+					toVisualiser <: position;
+			}
 	}
 
 }
