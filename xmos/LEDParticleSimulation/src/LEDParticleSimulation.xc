@@ -19,7 +19,7 @@ out port speaker = PORT_SPEAKER;
 
 #define noParticles 3 //overall number of particles threads in the system
 #define moveDenied 0
-
+#define moveAccepted 1
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -135,35 +135,54 @@ void particle(chanend left, chanend right, chanend toVisualiser, int startPositi
 	// ADD YOUR CODE HERE TO SIMULATE PARTICLE BEHAVIOUR
 	//
 	///////////////////////////////////////////////////////////////////////
-//	attemptedPosition = position + currentDirection;
-	select {
-		case left :> attemptedMove:
-			if (position == attemptedMove) {
-				left <: moveDenied;
-				currentDirection = (currentDirection == 1 ? -1 : 1);
-			}
-		case right :> attemptedMove:
-			if (position == attemptedMove) {
-				right <: moveDenied;
-				currentDirection = (currentDirection == 1 ? -1 : 1);
-			}
-		default:
-			attemptedPosition = position + currentDirection;
-			switch(currentDirection){
-				//Moving to right so sending to left channel
-				case 1:
-					right <: attemptedPosition;
-					right :> rightMoveForbidden;
+	while (1) {
+	//	attemptedPosition = position + currentDirection;
+		select {
+	/*		case left :> attemptedMove:
+				if (position == attemptedMove) {
+					left <: moveDenied;
 					currentDirection = (currentDirection == 1 ? -1 : 1);
-					toVisualiser <: position;
-				case -1:
-					left <: attemptedPosition;
-					left :> leftMoveForbidden;
+				} else {
+					left <: moveAccepted;
+				}
+				break;
+			case right :> attemptedMove:
+				if (position == attemptedMove) {
+					right <: moveDenied;
 					currentDirection = (currentDirection == 1 ? -1 : 1);
-					toVisualiser <: position;
-			}
+				} else {
+					right <: moveAccepted;
+				}
+				break; */
+			default:
+				attemptedPosition = (position + currentDirection) % 12;
+				switch(currentDirection){
+					//Moving to right so sending to right channel
+					case 1:
+						/*right <: attemptedPosition;
+						right :> rightMoveForbidden;
+						if (rightMoveForbidden == moveDenied) {
+							currentDirection = (currentDirection == 1 ? -1 : 1);
+						} else { */
+							position = attemptedPosition;
+						//}
+						toVisualiser <: position;
+						break;
+					case -1:
+						/*left <: attemptedPosition;
+						left :> leftMoveForbidden;
+						if (leftMoveForbidden == moveDenied) {
+							currentDirection = (currentDirection == 1 ? -1 : 1);
+						} else { */
+							position = attemptedPosition;
+						//}
+						toVisualiser <: position;
+						break;
+				}
+				break;
+		}
+		waitMoment(1000000000);
 	}
-
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
@@ -184,7 +203,9 @@ int main(void) {
 		// ADD YOUR CODE HERE TO REPLICATE PARTICLE THREADS particle(…)
 		//
 		///////////////////////////////////////////////////////////////////////
-
+		par (int i=0;i<noParticles;i++) {
+			on stdcore[i%4]: particle(neighbours[i], neighbours[(i+1) % noParticles], show[i], (3*i) % 12, 1);
+		}
 		//VISUALISER THREAD
 		on stdcore[0]: visualiser(buttonToVisualiser,show,quadrant,speaker);
 
