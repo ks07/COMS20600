@@ -23,8 +23,8 @@ out port speaker = PORT_SPEAKER;
 #define RIGHT 1
 #define NO_DIR 0
 
-#define MOVE_OK 1
-#define MOVE_FAIL 0
+#define MOVE_OK 16
+#define MOVE_FAIL 32
 
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -86,6 +86,9 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 	int j; //helper variable
 	cledR <: 1;
 	while (running) {
+		if (display[1] < display[0] && display[1] > display[2]) {
+			printf("balls\n");
+		}
 		for (int k=0;k<noParticles;k++) {
 			select {
 				case show[k] :> j:
@@ -130,11 +133,22 @@ unsigned int vToT(int velocity) {
 	return 10000000;
 }
 
+// % operator in C is remainder, not modulus!
+int mod12(int a) {
+	int r;
+	r = a % 12;
+	return (r >= 0) ? r : r + 12;
+}
+
+int isLeft(unsigned int base, unsigned int l, unsigned int r) {
+	return mod12((l - base)) > mod12((r - base));
+}
+
 //PARTICLE...thread to represent a particle - to be replicated noParticle-times
 void particle(streaming chanend left, streaming chanend right, chanend toVisualiser, int startPosition, int startDirection) {
 	unsigned int moveCounter = 0; //overall no of moves performed by particle so far
-	unsigned int position = startPosition; //the current particle position
-	unsigned int attemptedPosition; //the next attempted position after considering move direction
+	int position = startPosition; //the current particle position
+	int attemptedPosition; //the next attempted position after considering move direction
 	int currentDirection = startDirection; //the current direction the particle is moving
 	int leftMoveForbidden = 0; //the verdict of the left neighbour if move is allowed
 	int rightMoveForbidden = 0; //the verdict of the right neighbour if move is allowed
@@ -143,6 +157,12 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	int rcvTemp; //temp var to hold messages
 	timer tmr;
 	unsigned int t, waitTime;
+	int lp, rp;
+	lp = mod12((startPosition -1));
+	rp = mod12((startPosition +1));
+	if (!isLeft(position, lp, rp)) {
+		printf("fuck\n");
+	}
 
 	toVisualiser <: startPosition;
 	tmr :> waitTime; //First move is now.
@@ -150,6 +170,18 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	while (1) {
 		select {
 			case left :> rcvTemp:
+//				switch (waitingOn) {
+//				case LEFT:
+//
+//					break;
+//				case RIGHT:
+//
+//					break;
+//				default:
+//
+//					break;
+//				}
+
 				if (waitingOn == LEFT) {
 					// Waiting for resp from left, this must be a resp.
 					if (rcvTemp == MOVE_OK) {
@@ -164,6 +196,10 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 					waitingOn = NO_DIR;
 				} else {
 					// Left is requesting info from us.
+					if (rcvTemp > 11) {
+						printf("shit\n");
+					}
+					lp = rcvTemp - 1;
 					if (rcvTemp == position) {
 						if (waitingOn == RIGHT) {
 							left <: MOVE_FAIL;
@@ -197,6 +233,10 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 //					printf("%d %d\n", startPosition, position);
 					waitingOn = NO_DIR;
 				} else {
+					if (rcvTemp > 11) {
+						printf("shit\n");
+					}
+					rp = rcvTemp +1;
 					// Left is requesting info from us.
 					if (rcvTemp == position) {
 						if (waitingOn == LEFT) {
@@ -224,7 +264,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 				if (t >= waitTime) {
 					// We've waited long enough to attempt another move. Check if we're still waiting for a response.
 					if (waitingOn == NO_DIR) {
-						attemptedPosition = (position + currentDirection) % 12;
+						attemptedPosition = mod12((position + currentDirection));
 						waitTime = t + vToT(currentVelocity);
 						if (currentDirection == LEFT) {
 							left <: attemptedPosition;
