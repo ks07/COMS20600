@@ -19,6 +19,12 @@ out port speaker = PORT_SPEAKER;
 
 #define noParticles 3 //overall number of particles threads in the system
 
+#define LEFT -1
+#define RIGHT 1
+#define NO_DIR 0
+
+#define MOVE_OK 1
+#define MOVE_FAIL 0
 
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -119,9 +125,13 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 	}
 }
 
+unsigned int vToT(int velocity) {
+	// TODO: Return a function of v.
+	return 10000000;
+}
 
 //PARTICLE...thread to represent a particle - to be replicated noParticle-times
-void particle(chanend left, chanend right, chanend toVisualiser, int startPosition, int startDirection) {
+void particle(streaming chanend left, streaming chanend right, chanend toVisualiser, int startPosition, int startDirection) {
 	unsigned int moveCounter = 0; //overall no of moves performed by particle so far
 	unsigned int position = startPosition; //the current particle position
 	unsigned int attemptedPosition; //the next attempted position after considering move direction
@@ -129,23 +139,114 @@ void particle(chanend left, chanend right, chanend toVisualiser, int startPositi
 	int leftMoveForbidden = 0; //the verdict of the left neighbour if move is allowed
 	int rightMoveForbidden = 0; //the verdict of the right neighbour if move is allowed
 	int currentVelocity = 1; //the current particle velocity
-	///////////////////////////////////////////////////////////////////////
-	//
-	// ADD YOUR CODE HERE TO SIMULATE PARTICLE BEHAVIOUR
-	//
-	///////////////////////////////////////////////////////////////////////
-	attemptedPosition = position + currentDirection;
-	select {
-		left :>
-	}
+	int waitingOn = NO_DIR; // -1 if waiting for left resp, 1 if right, 0 if no req sent
+	int rcvTemp; //temp var to hold messages
+	timer tmr;
+	unsigned int t, waitTime;
 
+	toVisualiser <: startPosition;
+	tmr :> waitTime; //First move is now.
+
+	while (1) {
+		select {
+			case left :> rcvTemp:
+				if (waitingOn == LEFT) {
+					// Waiting for resp from left, this must be a resp.
+					if (rcvTemp == MOVE_OK) {
+						position = attemptedPosition;
+						toVisualiser <: position;
+					} else {
+						// MOVE_FAIL
+						currentDirection *= -1;
+						attemptedPosition = position; // Reset our attempt.
+					}
+//					printf("%d %d\n", startPosition, position);
+					waitingOn = NO_DIR;
+				} else {
+					// Left is requesting info from us.
+					if (rcvTemp == position) {
+						if (waitingOn == RIGHT) {
+							left <: MOVE_FAIL;
+							// Two possibilities - right isn't present, so we can move - left will not change our direction (though may bounce early)
+							// Else right is present, and is about to switch our direction. However, left approach afterwards mean outcome = right
+							// Thus, no bounce
+						} else {
+							left <: MOVE_FAIL;
+							// We're waiting on nothing. Thus bounce if going left.
+							if (currentDirection == LEFT) {
+								// We should switch direction iff we collide head on.
+								currentDirection = RIGHT;
+							}
+						}
+					} else {
+						left <: MOVE_OK;
+					}
+				}
+				break;
+			case right :> rcvTemp:
+				if (waitingOn == RIGHT) {
+					// Waiting for resp from right, this must be a resp.
+					if (rcvTemp == MOVE_OK) {
+						position = attemptedPosition;
+						toVisualiser <: position;
+					} else {
+						// MOVE_FAIL
+						currentDirection *= -1;
+						attemptedPosition = position; // Reset our attempt.
+					}
+//					printf("%d %d\n", startPosition, position);
+					waitingOn = NO_DIR;
+				} else {
+					// Left is requesting info from us.
+					if (rcvTemp == position) {
+						if (waitingOn == LEFT) {
+							right <: MOVE_FAIL;
+							// Two possibilities - right isn't present, so we can move - left will not change our direction (though may bounce early)
+							// Else right is present, and is about to switch our direction. However, left approach afterwards mean outcome = right
+							// Thus, no bounce
+						} else {
+							right <: MOVE_FAIL;
+							// We're waiting on nothing. Thus bounce if going left.
+							if (currentDirection == RIGHT) {
+								// We should switch direction iff we collide head on.
+								currentDirection = LEFT;
+							}
+						}
+					} else {
+						right <: MOVE_OK;
+					}
+				}
+				break;
+			//case tmr when timerafter(waitTime) :> t:
+			default:
+				// TODO: Remove busy wait?
+				tmr :> t;
+				if (t >= waitTime) {
+					// We've waited long enough to attempt another move. Check if we're still waiting for a response.
+					if (waitingOn == NO_DIR) {
+						attemptedPosition = (position + currentDirection) % 12;
+						waitTime = t + vToT(currentVelocity);
+						if (currentDirection == LEFT) {
+							left <: attemptedPosition;
+							waitingOn = LEFT;
+						} else {
+							right <: attemptedPosition;
+							waitingOn = RIGHT;
+						}
+					} else {
+						// We're still waiting for a response, return to wait but don't update timer.
+					}
+				}
+				break;
+		}
+	}
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
 int main(void) {
 	chan quadrant[4]; //helper channels for LED visualisation
 	chan show[noParticles]; //channels to link visualiser with particles
-	chan neighbours[noParticles]; //channels to link neighbouring particles
+	streaming chan neighbours[noParticles]; //channels to link neighbouring particles
 	chan buttonToVisualiser; //channel to link buttons and visualiser
 
 	//MAIN PROCESS HARNESS
@@ -154,11 +255,9 @@ int main(void) {
 		//BUTTON LISTENER THREAD
 		on stdcore[0]: buttonListener(buttons,buttonToVisualiser);
 
-		///////////////////////////////////////////////////////////////////////
-		//
-		// ADD YOUR CODE HERE TO REPLICATE PARTICLE THREADS particle(…)
-		//
-		///////////////////////////////////////////////////////////////////////
+		par (int i=0;i<noParticles;i++) {
+			on stdcore[i%4]: particle(neighbours[i], neighbours[(i+1) % noParticles], show[i], ((12/noParticles)*i) % 12, (i & 1) ? -1 : 1);
+		}
 
 		//VISUALISER THREAD
 		on stdcore[0]: visualiser(buttonToVisualiser,show,quadrant,speaker);
