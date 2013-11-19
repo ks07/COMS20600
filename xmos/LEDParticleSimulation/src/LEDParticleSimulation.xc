@@ -170,15 +170,14 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 					// Waiting for response from left, message from left.
 					if (rcvTemp == MOVE_OK) {
 						position = attemptedPosition;
-						toVisualiser <: position;
-						waitingOn = NO_DIR;
 						// Increment move counter.
 						moveCounter++;
 					} else {
 						// We have crashed, change direction.
 						currentDirection *= -1;
-						attemptedPosition = position;
 					}
+					toVisualiser <: position;
+					waitingOn = NO_DIR;
 					break;
 				case RIGHT:
 					// Waiting for response from right, left is requesting.
@@ -219,15 +218,14 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 						// Waiting for response from right, message from right.
 						if (rcvTemp == MOVE_OK) {
 							position = attemptedPosition;
-							toVisualiser <: position;
-							waitingOn = NO_DIR;
 							// Increment move counter.
 							moveCounter++;
 						} else {
 							// We have crashed, change direction.
 							currentDirection *= -1;
-							attemptedPosition = position;
 						}
+						toVisualiser <: position;
+						waitingOn = NO_DIR;
 						break;
 					case LEFT:
 						// Waiting for response from left, right is requesting.
@@ -264,7 +262,10 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 				default:
 					tmr :> t;
 
-					if (t >= waitTime) {
+					if (t >= waitTime && waitingOn != NO_DIR) {
+						printf("particle %d in pos %d has timed out waiting for %d\n", startPosition, position, waitingOn);
+					}
+					if (t >= waitTime && waitingOn == NO_DIR) {
 						// Request to move.
 						attemptedPosition = mod12(position + currentDirection);
 						waitTime = t + vToT(currentVelocity);
