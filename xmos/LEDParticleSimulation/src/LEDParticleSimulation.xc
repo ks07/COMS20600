@@ -87,7 +87,7 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 	cledR <: 1;
 	while (running) {
 		if (display[1] < display[0] && display[1] > display[2]) {
-			printf("balls\n");
+			printf("very bad\n");
 		}
 		for (int k=0;k<noParticles;k++) {
 			select {
@@ -157,127 +157,133 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	int rcvTemp; //temp var to hold messages
 	timer tmr;
 	unsigned int t, waitTime;
-	int lp, rp;
-	lp = mod12((startPosition -1));
-	rp = mod12((startPosition +1));
-	if (!isLeft(position, lp, rp)) {
-		printf("fuck\n");
-	}
 
 	toVisualiser <: startPosition;
 	tmr :> waitTime; //First move is now.
 
 	while (1) {
+		// TODO: Prioritise reading responses over checking new requests.
 		select {
 			case left :> rcvTemp:
-//				switch (waitingOn) {
-//				case LEFT:
-//
-//					break;
-//				case RIGHT:
-//
-//					break;
-//				default:
-//
-//					break;
-//				}
-
-				if (waitingOn == LEFT) {
-					// Waiting for resp from left, this must be a resp.
+				switch (waitingOn) {
+				case LEFT:
+					// Waiting for response from left, message from left.
 					if (rcvTemp == MOVE_OK) {
 						position = attemptedPosition;
 						toVisualiser <: position;
+						waitingOn = NO_DIR;
+						// Increment move counter.
+						moveCounter++;
 					} else {
-						// MOVE_FAIL
+						// We have crashed, change direction.
 						currentDirection *= -1;
-						attemptedPosition = position; // Reset our attempt.
+						attemptedPosition = position;
 					}
-//					printf("%d %d\n", startPosition, position);
-					waitingOn = NO_DIR;
-				} else {
-					// Left is requesting info from us.
+					break;
+				case RIGHT:
+					// Waiting for response from right, left is requesting.
 					if (rcvTemp > 11) {
-						printf("shit\n");
+						printf("Left responding when we aren't waiting!\n");
 					}
-					lp = rcvTemp - 1;
 					if (rcvTemp == position) {
-						if (waitingOn == RIGHT) {
-							left <: MOVE_FAIL;
-							// Two possibilities - right isn't present, so we can move - left will not change our direction (though may bounce early)
-							// Else right is present, and is about to switch our direction. However, left approach afterwards mean outcome = right
-							// Thus, no bounce
-						} else {
-							left <: MOVE_FAIL;
-							// We're waiting on nothing. Thus bounce if going left.
-							if (currentDirection == LEFT) {
-								// We should switch direction iff we collide head on.
-								currentDirection = RIGHT;
-							}
-						}
+						// The left particle is trying to move into us, crash it. We are moving away from it already, so we simply continue.
+						left <: MOVE_FAIL;
 					} else {
 						left <: MOVE_OK;
 					}
-				}
-				break;
-			case right :> rcvTemp:
-				if (waitingOn == RIGHT) {
-					// Waiting for resp from right, this must be a resp.
-					if (rcvTemp == MOVE_OK) {
-						position = attemptedPosition;
-						toVisualiser <: position;
-					} else {
-						// MOVE_FAIL
-						currentDirection *= -1;
-						attemptedPosition = position; // Reset our attempt.
-					}
-//					printf("%d %d\n", startPosition, position);
-					waitingOn = NO_DIR;
-				} else {
+					break;
+				default:
+					// We're not waiting for anyone. We must be waiting to send a move request. We are being sent a request.
 					if (rcvTemp > 11) {
-						printf("shit\n");
+						printf("Right responding when we aren't waiting! (No wait)\n");
 					}
-					rp = rcvTemp +1;
-					// Left is requesting info from us.
-					if (rcvTemp == position) {
-						if (waitingOn == LEFT) {
-							right <: MOVE_FAIL;
-							// Two possibilities - right isn't present, so we can move - left will not change our direction (though may bounce early)
-							// Else right is present, and is about to switch our direction. However, left approach afterwards mean outcome = right
-							// Thus, no bounce
-						} else {
-							right <: MOVE_FAIL;
-							// We're waiting on nothing. Thus bounce if going left.
-							if (currentDirection == RIGHT) {
-								// We should switch direction iff we collide head on.
-								currentDirection = LEFT;
-							}
-						}
+					if (rcvTemp == position && currentDirection == LEFT) {
+						// Head on collision. Bounce.
+						currentDirection *= -1;
+						attemptedPosition = position;
+						left <: MOVE_FAIL;
+					} else if (rcvTemp == position) {
+						// Rear ended. Push back the other but stay on course.
+						left <: MOVE_FAIL;
 					} else {
-						right <: MOVE_OK;
+						// Left is in the clear.
+						left <: MOVE_OK;
 					}
+					break;
 				}
-				break;
-			//case tmr when timerafter(waitTime) :> t:
-			default:
-				// TODO: Remove busy wait?
-				tmr :> t;
-				if (t >= waitTime) {
-					// We've waited long enough to attempt another move. Check if we're still waiting for a response.
-					if (waitingOn == NO_DIR) {
-						attemptedPosition = mod12((position + currentDirection));
+			break; // LEFT RCV
+			case right :> rcvTemp:
+				// This should always reflect the left case, but with mirrored directions.
+				switch (waitingOn) {
+					case RIGHT:
+						// Waiting for response from right, message from right.
+						if (rcvTemp == MOVE_OK) {
+							position = attemptedPosition;
+							toVisualiser <: position;
+							waitingOn = NO_DIR;
+							// Increment move counter.
+							moveCounter++;
+						} else {
+							// We have crashed, change direction.
+							currentDirection *= -1;
+							attemptedPosition = position;
+						}
+						break;
+					case LEFT:
+						// Waiting for response from left, right is requesting.
+						if (rcvTemp > 11) {
+							printf("Right responding when we aren't waiting!\n");
+						}
+						if (rcvTemp == position) {
+							// The left particle is trying to move into us, crash it. We are moving away from it already, so we simply continue.
+							right <: MOVE_FAIL;
+						} else {
+							right <: MOVE_OK;
+						}
+						break;
+					default:
+						// We're not waiting for anyone. We must be waiting to send a move request. We are being sent a request.
+						if (rcvTemp > 11) {
+							printf("Right responding when we aren't waiting! (No wait)\n");
+						}
+						if (rcvTemp == position && currentDirection == RIGHT) {
+							// Head on collision. Bounce.
+							currentDirection *= -1;
+							attemptedPosition = position;
+							right <: MOVE_FAIL;
+						} else if (rcvTemp == position) {
+							// Rear ended. Push back the other but stay on course.
+							right <: MOVE_FAIL;
+						} else {
+							// Right is in the clear.
+							right <: MOVE_OK;
+						}
+						break;
+					}
+				break; // RIGHT RCV
+				default:
+					tmr :> t;
+
+					if (t >= waitTime) {
+						// Request to move.
+						attemptedPosition = mod12(position + currentDirection);
 						waitTime = t + vToT(currentVelocity);
-						if (currentDirection == LEFT) {
+
+						switch (currentDirection) {
+						case LEFT:
 							left <: attemptedPosition;
 							waitingOn = LEFT;
-						} else {
+							break;
+						case RIGHT:
 							right <: attemptedPosition;
 							waitingOn = RIGHT;
+							break;
+						default:
+							printf("Error invalid direction.\n");
+							break;
 						}
-					} else {
-						// We're still waiting for a response, return to wait but don't update timer.
 					}
-				}
-				break;
+				break; // DEFAULT
 		}
 	}
 }
