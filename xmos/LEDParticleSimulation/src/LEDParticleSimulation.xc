@@ -32,7 +32,8 @@ out port speaker = PORT_SPEAKER;
 #define BTNC 11
 #define BTND 7
 
-#define STOP 1
+#define BTN_START 0
+#define BTN_STOP 1
 
 #define RUNNING 0
 #define SHUTDOWNPENDING 1
@@ -112,6 +113,7 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 	cledR <: 1;
 	for (j = 0; j < noParticles; j++) {
 		particleFlag[j] = RUNNING;
+		display[j] = 12;
 	}
 	while (running) {
 
@@ -128,6 +130,7 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 						particleFlag[k] = SHUTDOWNPENDING;
 						shutCount++;
 					} else if (shutCount == noParticles && particleFlag[k] != SHUTDOWN) {
+						// TODO: Remove me?
 						// All particles have been told to prep shutdown. Inform them to shut down.
 						show[k] <: PARTICLE_STOP;
 						particleFlag[k] = SHUTDOWN;
@@ -142,8 +145,13 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 				break;
 				case toButtons :> p:
 					switch(p) {
-					    case STOP:
+					    case BTN_STOP:
 					    	goingShut = 1;
+					    break;
+					    case BTN_START:
+					    	for (int a=0;a<noParticles;a++) {
+					    		show[a] <: BTN_START;
+					    	}
 					    break;
 					}
 				break;
@@ -160,8 +168,11 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 			//visualise particles
 			for (int i=0;i<4;i++) {
 				j = 0;
-				for (int k=0;k<noParticles;k++)
-					j += (16<<(display[k]%3))*(display[k]/3==i);
+				for (int k=0;k<noParticles;k++) {
+					if (display[k] < 12) {
+						j += (16<<(display[k]%3))*(display[k]/3==i);
+					}
+				}
 				toQuadrant[i] <: j;
 			}
 		}
@@ -175,6 +186,7 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 void buttonListener(in port buttons, chanend toVisualiser) {
 	int buttonInput; //button pattern currently pressed
 	unsigned int running = 1; //helper variable to determine system shutdown
+	int started = 0; //TODO: combine with goingshut? Signifies if we have told everything to start or not.
 	while (running) {
 		buttons when pinsneq(15) :> buttonInput;
 		///////////////////////////////////////////////////////////////////////
@@ -185,7 +197,10 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 		switch (buttonInput) {
 		case BTNA:
 			// A = Start
-
+			if (!started) {
+				toVisualiser <: BTN_START;
+				started = 1;
+			}
 			break;
 		case BTNB:
 			// B = Pause/Restart
@@ -193,7 +208,7 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 			break;
 		case BTNC:
 			// C = Quit
-			toVisualiser <: STOP;
+			toVisualiser <: BTN_STOP;
 			running = 0;
 			break;
 		case BTND:
@@ -236,6 +251,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	int shutdownRequested = 0;
 	int live = 1;
 
+	toVisualiser :> rcvTemp; //Wait for start button
 	toVisualiser <: startPosition;
 	tmr :> waitTime; //First move is now.
 
@@ -381,7 +397,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 		}
 	}
 
-	printf("Shutting down particle %d", startPosition);
+	printf("Shutting down particle %d\n", startPosition);
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
