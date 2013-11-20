@@ -40,7 +40,8 @@ out port speaker = PORT_SPEAKER;
 
 #define PARTICLE_PREP_STOP 12
 #define PARTICLE_STOP 13
-#define PARTICLE_COMPLETE 12
+
+#define QUAD_STOP 15
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -56,7 +57,11 @@ void showLED(out port p, chanend fromVisualiser) {
 	while (running) {
 		select {
 			case fromVisualiser :> lightUpPattern: //read LED pattern from visualiser process
-				p <: lightUpPattern; //send pattern to LEDs
+				if (lightUpPattern == QUAD_STOP) {
+					running = 0;
+				} else {
+					p <: lightUpPattern; //send pattern to LEDs
+				}
 			break;
 			default:
 			break;
@@ -101,6 +106,8 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 	int j, p; //helper variable
 	int goingShut = 0;
 	int particleFlag[noParticles];
+	int shutCount = 0;
+	int finCount = 0;
 	cledR <: 1;
 	for (j = 0; j < noParticles; j++) {
 		particleFlag[j] = RUNNING;
@@ -116,13 +123,17 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 				//TODO: Kill off particles once all have been notified.
 				case show[k] :> j:
 					if (goingShut && particleFlag[k] == RUNNING) {
-						show[k] <: STOP;
+						show[k] <: PARTICLE_PREP_STOP;
 						particleFlag[k] = SHUTDOWNPENDING;
-					} else if (particleFlag[k] == SHUTDOWNPENDING && j == PARTICLE_COMPLETE) {
+						shutCount++;
+					} else if (shutCount == noParticles && particleFlag[k] != SHUTDOWN) {
+						// All particles have been told to prep shutdown. Inform them to shut down.
+						show[k] <: PARTICLE_STOP;
 						particleFlag[k] = SHUTDOWN;
+						finCount++;
 					} else if (j<12) {
 						display[k] = j;
-					} else if (j == PARTICLE_COMPLETE) {
+					} else if (j < 14) {
 						printf("INVALID\n");
 					} else {
 						playSound(20000,20,speaker);
@@ -136,6 +147,13 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 					}
 				break;
 				default:
+					if (finCount == noParticles) {
+						running = 0;
+					} else if (goingShut && shutCount == noParticles && particleFlag[k] != SHUTDOWN) {
+						show[k] <: PARTICLE_STOP;
+						particleFlag[k] = SHUTDOWN;
+						finCount++;
+					}
 				break;
 			}
 			//visualise particles
@@ -146,6 +164,9 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 				toQuadrant[i] <: j;
 			}
 		}
+	}
+	for (int i=0;i<4;i++) {
+		toQuadrant[i] <: QUAD_STOP;
 	}
 }
 
@@ -211,15 +232,21 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	timer tmr;
 	unsigned int t, waitTime;
 	int shutdownRequested = 0;
+	int live = 1;
 
 	toVisualiser <: startPosition;
 	tmr :> waitTime; //First move is now.
 
-	while (1) {
+	while (live) {
 		// TODO: Prioritise reading responses over checking new requests.
 		select {
 			case toVisualiser :> rcvTemp:
-				shutdownRequested = 1;
+				printf("p %d Rcv from vis: %d\n", startPosition, rcvTemp);
+				if (rcvTemp == PARTICLE_PREP_STOP) {
+					shutdownRequested = 1;
+				} else if (rcvTemp == PARTICLE_STOP) {
+					live = 0;
+				}
 				break;
 			case left :> rcvTemp:
 				switch (waitingOn) {
@@ -326,7 +353,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 					tmr :> t;
 
 					if (t >= waitTime && waitingOn != NO_DIR) {
-						printf("particle %d in pos %d has timed out waiting for %d\n", startPosition, position, waitingOn);
+						//printf("particle %d in pos %d has timed out waiting for %d\n", startPosition, position, waitingOn);
 					}
 					// If we're waiting to shutdown, we should never send.
 					if (t >= waitTime && waitingOn == NO_DIR && !shutdownRequested) {
@@ -351,6 +378,8 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 				break; // DEFAULT
 		}
 	}
+
+	printf("Shutting down particle %d", startPosition);
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
