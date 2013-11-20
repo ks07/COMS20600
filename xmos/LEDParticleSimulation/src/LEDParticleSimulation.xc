@@ -124,10 +124,9 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 			printf("very bad\n");
 		}
 		for (int k=0;k<noParticles;k++) {
-			select {
-				//TODO: Kill off particles once all have been notified.
+			if (!paused) {
+				select {
 				case show[k] :> j:
-					if(!paused) {
 					if (goingShut && particleFlag[k] == RUNNING) {
 						// We've been asked to shutdown, inform the current particle it should prepare to quit.
 						show[k] <: PARTICLE_PREP_STOP;
@@ -143,8 +142,12 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 						// Sent a high, play a sound.
 						playSound(20000,20,speaker);
 					}
-					}
 				break;
+				default:
+				break;
+				}
+			}
+			select {
 				case toButtons :> p:
 					switch(p) {
 					    case BTN_STOP:
@@ -192,6 +195,7 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 	int buttonInput; //button pattern currently pressed
 	unsigned int running = 1; //helper variable to determine system shutdown
 	int started = 0; //TODO: combine with goingshut? Signifies if we have told everything to start or not.
+	int paused = 0;
 	while (running) {
 		buttons when pinsneq(15) :> buttonInput;
 		switch (buttonInput) {
@@ -200,11 +204,17 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 			if (!started) {
 				toVisualiser <: BTN_START;
 				started = 1;
+			} else if (paused) {
+				paused = 0;
+				toVisualiser <: BTN_PAUSE;
 			}
 			break;
 		case BTNB:
 			// B = Pause
-			toVisualiser <: BTN_PAUSE;
+			if (!paused) {
+				toVisualiser <: BTN_PAUSE;
+				paused = 1;
+			}
 			break;
 		case BTNC:
 			// C = Quit
