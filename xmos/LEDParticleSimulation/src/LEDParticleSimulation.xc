@@ -60,6 +60,8 @@ out port speaker = PORT_SPEAKER;
 
 #define NO_BOUND 17
 
+#define BASE_VEL 10000000
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Helper Functions provided for you
@@ -191,7 +193,7 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 					break;
 			}
 
-			waitMoment(50000000);
+			waitMoment(10000000);
 		}
 	}
 	while (running) {
@@ -328,10 +330,10 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 //}
 
 unsigned int sanitiseVelocity(unsigned int vel) {
-	if (vel <= 1000000) {
+	if (vel <= (BASE_VEL / 10)) {
 		// If more than 10 times faster, revert to 10x speed.
 		return 1000000;
-	} else if (vel >= 100000000) {
+	} else if (vel >= (BASE_VEL * 10)) {
 		// If less than 10 times slower, revert.
 		return 100000000;
 	} else {
@@ -347,7 +349,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	int currentDirection = startDirection; //the current direction the particle is moving
 	int leftMoveForbidden = 0; //the verdict of the left neighbour if move is allowed
 	int rightMoveForbidden = 0; //the verdict of the right neighbour if move is allowed
-	unsigned int currentVelocity = startVelocity; //the current particle velocity (old default = 10000000)
+	unsigned int currentVelocity = sanitiseVelocity(startVelocity); //the current particle velocity (old default = 10000000)
 	int waitingOn = NO_DIR; // -1 if waiting for left resp, 1 if right, 0 if no req sent
 	int rcvTemp; //temp var to hold messagesy
 	timer tmr;
@@ -397,7 +399,6 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	tmr :> waitTime; //First move is now.
 
 	while (live) {
-		// TODO: Prioritise reading responses over checking new requests.
 		select {
 			case toVisualiser :> rcvTemp:
 				if (rcvTemp == PARTICLE_PREP_STOP) {
@@ -417,8 +418,9 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 							// Increment move counter.
 							moveCounter++;
 						} else if (rcvTemp == MOVE_FAIL_CRASH) {
-							// We have crashed, change direction.
+							// We have crashed, change direction, reset speed (fake physics, yay!)
 							currentDirection *= -1;
+							currentVelocity = sanitiseVelocity(BASE_VEL);
 						} else {
 							// We have rear ended, change direction and slow down.
 							currentVelocity = sanitiseVelocity(currentVelocity + 200000);
@@ -437,6 +439,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 					if (rcvTemp == position) {
 						// The left particle is trying to move into us, crash it. We are moving away from it already, so we simply continue.
 						left <: MOVE_FAIL_REAR;
+						currentVelocity = sanitiseVelocity(currentVelocity - 200000);
 					} else {
 						left <: MOVE_OK;
 					}
@@ -450,6 +453,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 						// Head on collision. Bounce.
 						currentDirection *= -1;
 						attemptedPosition = position;
+						currentVelocity = sanitiseVelocity(BASE_VEL);
 						left <: MOVE_FAIL_CRASH;
 					} else if (rcvTemp == position) {
 						// Rear ended. Push back the other but stay on course.
@@ -476,6 +480,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 							} else if (rcvTemp == MOVE_FAIL_CRASH) {
 								// We have crashed, change direction.
 								currentDirection *= -1;
+								currentVelocity = sanitiseVelocity(BASE_VEL);
 							} else {
 								// We have rear ended, change direction and slow down.
 								currentVelocity = sanitiseVelocity(currentVelocity + 200000);
@@ -495,6 +500,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 						if (rcvTemp == position) {
 							// The left particle is trying to move into us, crash it. We are moving away from it already, so we simply continue.
 							right <: MOVE_FAIL_REAR;
+							currentVelocity = sanitiseVelocity(currentVelocity - 200000);
 						} else {
 							right <: MOVE_OK;
 						}
@@ -508,10 +514,11 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 							// Head on collision. Bounce.
 							currentDirection *= -1;
 							attemptedPosition = position;
+							currentVelocity = sanitiseVelocity(BASE_VEL);
 							right <: MOVE_FAIL_CRASH;
 						} else if (rcvTemp == position) {
 							// Rear ended. Push back the other but stay on course.
-							currentVelocity = sanitiseVelocity(currentVelocity + 200000);
+							currentVelocity = sanitiseVelocity(currentVelocity - 200000);
 							right <: MOVE_FAIL_REAR;
 						} else {
 							// Right is in the clear.
@@ -561,12 +568,11 @@ int main(void) {
 
 	//MAIN PROCESS HARNESS
 	par{
-
 		//BUTTON LISTENER THREAD
 		on stdcore[0]: buttonListener(buttons,buttonToVisualiser);
 
 		par (int i=0;i<noParticles;i++) {
-			on stdcore[i%4]: particle(neighbours[i], neighbours[(i+1) % noParticles], show[i], ((12/noParticles)*i) % 12, (i & 1) ? -1 : 1, 10000000 + i*200000);
+			on stdcore[i%4]: particle(neighbours[i], neighbours[(i+1) % noParticles], show[i], ((12/noParticles)*i) % 12, (i & 1) ? -1 : 1, 10000000 /*+ i*50000*/);
 		}
 
 		//VISUALISER THREAD
@@ -576,7 +582,6 @@ int main(void) {
 		par (int k=0;k<4;k++) {
 			on stdcore[k%4]: showLED(cled[k],quadrant[k]);
 		}
-
 	}
 	return 0;
 }
