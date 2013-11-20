@@ -291,6 +291,8 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 							currentDirection *= -1;
 						}
 						toVisualiser <: position;
+						tmr :> t;
+						waitTime = t + vToT(currentVelocity);
 					}
 					waitingOn = NO_DIR;
 					break;
@@ -342,6 +344,9 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 								currentDirection *= -1;
 							}
 							toVisualiser <: position;
+							tmr :> t;
+							waitTime = t + vToT(currentVelocity);
+
 						}
 						waitingOn = NO_DIR;
 						break;
@@ -387,7 +392,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 					if (t >= waitTime && waitingOn == NO_DIR && !shutdownRequested) {
 						// Request to move.
 						attemptedPosition = mod12(position + currentDirection);
-						waitTime = t + vToT(currentVelocity);
+//						waitTime = t + vToT(currentVelocity);
 
 						switch (currentDirection) {
 						case LEFT:
