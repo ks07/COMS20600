@@ -17,6 +17,7 @@ out port cledR = PORT_CLOCKLED_SELR;
 in port buttons = PORT_BUTTON;
 out port speaker = PORT_SPEAKER;
 
+// max particles of 5, any more and the number of channels on core 0 will be exceeded.
 #define noParticles 3 //overall number of particles threads in the system
 
 #define LEFT -1
@@ -26,6 +27,20 @@ out port speaker = PORT_SPEAKER;
 #define MOVE_OK 16
 #define MOVE_FAIL 32
 
+#define BTNA 14
+#define BTNB 13
+#define BTNC 11
+#define BTND 7
+
+#define STOP 1
+
+#define RUNNING 0
+#define SHUTDOWNPENDING 1
+#define SHUTDOWN 2
+
+#define PARTICLE_PREP_STOP 12
+#define PARTICLE_STOP 13
+#define PARTICLE_COMPLETE 12
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -83,23 +98,43 @@ void waitMoment(uint myTime) {
 void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out port speaker) {
 	unsigned int display[noParticles]; //array of ant positions to be displayed, all values 0..11
 	unsigned int running = 1; //helper variable to determine system shutdown
-	int j; //helper variable
+	int j, p; //helper variable
+	int goingShut = 0;
+	int particleFlag[noParticles];
 	cledR <: 1;
+	for (j = 0; j < noParticles; j++) {
+		particleFlag[j] = RUNNING;
+	}
 	while (running) {
+
+		// Debugging check of particle ordering.
 		if (display[1] < display[0] && display[1] > display[2]) {
 			printf("very bad\n");
 		}
 		for (int k=0;k<noParticles;k++) {
 			select {
+				//TODO: Kill off particles once all have been notified.
 				case show[k] :> j:
-					if (j<12) display[k] = j; else
-					playSound(20000,20,speaker);
+					if (goingShut && particleFlag[k] == RUNNING) {
+						show[k] <: STOP;
+						particleFlag[k] = SHUTDOWNPENDING;
+					} else if (particleFlag[k] == SHUTDOWNPENDING && j == PARTICLE_COMPLETE) {
+						particleFlag[k] = SHUTDOWN;
+					} else if (j<12) {
+						display[k] = j;
+					} else if (j == PARTICLE_COMPLETE) {
+						printf("INVALID\n");
+					} else {
+						playSound(20000,20,speaker);
+					}
 				break;
-				///////////////////////////////////////////////////////////////////////
-				//
-				// ADD YOUR CODE HERE TO ACT ON BUTTON INPUT
-				//
-				///////////////////////////////////////////////////////////////////////
+				case toButtons :> p:
+					switch(p) {
+					    case STOP:
+					    	goingShut = 1;
+					    break;
+					}
+				break;
 				default:
 				break;
 			}
@@ -125,6 +160,24 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 		// ADD YOUR CODE HERE TO ACT ON BUTTON INPUT
 		//
 		///////////////////////////////////////////////////////////////////////
+		switch (buttonInput) {
+		case BTNA:
+			// A = Start
+
+			break;
+		case BTNB:
+			// B = Pause/Restart
+
+			break;
+		case BTNC:
+			// C = Quit
+			toVisualiser <: STOP;
+			break;
+		case BTND:
+			// D = Noop
+			//TODO: Extra stuff
+			break;
+		}
 	}
 }
 
@@ -157,6 +210,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	int rcvTemp; //temp var to hold messages
 	timer tmr;
 	unsigned int t, waitTime;
+	int shutdownRequested = 0;
 
 	toVisualiser <: startPosition;
 	tmr :> waitTime; //First move is now.
@@ -164,19 +218,25 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	while (1) {
 		// TODO: Prioritise reading responses over checking new requests.
 		select {
+			case toVisualiser :> rcvTemp:
+				shutdownRequested = 1;
+				break;
 			case left :> rcvTemp:
 				switch (waitingOn) {
 				case LEFT:
 					// Waiting for response from left, message from left.
-					if (rcvTemp == MOVE_OK) {
-						position = attemptedPosition;
-						// Increment move counter.
-						moveCounter++;
-					} else {
-						// We have crashed, change direction.
-						currentDirection *= -1;
+					if (!shutdownRequested) {
+						// Only act on response if we're not shutting down.
+						if (rcvTemp == MOVE_OK) {
+							position = attemptedPosition;
+							// Increment move counter.
+							moveCounter++;
+						} else {
+							// We have crashed, change direction.
+							currentDirection *= -1;
+						}
+						toVisualiser <: position;
 					}
-					toVisualiser <: position;
 					waitingOn = NO_DIR;
 					break;
 				case RIGHT:
@@ -215,16 +275,19 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 				// This should always reflect the left case, but with mirrored directions.
 				switch (waitingOn) {
 					case RIGHT:
-						// Waiting for response from right, message from right.
-						if (rcvTemp == MOVE_OK) {
-							position = attemptedPosition;
-							// Increment move counter.
-							moveCounter++;
-						} else {
-							// We have crashed, change direction.
-							currentDirection *= -1;
+						if (!shutdownRequested) {
+							// Only act on response if we're not shutting down.
+							// Waiting for response from right, message from right.
+							if (rcvTemp == MOVE_OK) {
+								position = attemptedPosition;
+								// Increment move counter.
+								moveCounter++;
+							} else {
+								// We have crashed, change direction.
+								currentDirection *= -1;
+							}
+							toVisualiser <: position;
 						}
-						toVisualiser <: position;
 						waitingOn = NO_DIR;
 						break;
 					case LEFT:
@@ -265,7 +328,8 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 					if (t >= waitTime && waitingOn != NO_DIR) {
 						printf("particle %d in pos %d has timed out waiting for %d\n", startPosition, position, waitingOn);
 					}
-					if (t >= waitTime && waitingOn == NO_DIR) {
+					// If we're waiting to shutdown, we should never send.
+					if (t >= waitTime && waitingOn == NO_DIR && !shutdownRequested) {
 						// Request to move.
 						attemptedPosition = mod12(position + currentDirection);
 						waitTime = t + vToT(currentVelocity);
