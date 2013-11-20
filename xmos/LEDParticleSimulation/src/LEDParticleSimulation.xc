@@ -58,6 +58,7 @@ void showLED(out port p, chanend fromVisualiser) {
 		select {
 			case fromVisualiser :> lightUpPattern: //read LED pattern from visualiser process
 				if (lightUpPattern == QUAD_STOP) {
+					p <: 0; // Turn off all LEDs.
 					running = 0;
 				} else {
 					p <: lightUpPattern; //send pattern to LEDs
@@ -193,6 +194,7 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 		case BTNC:
 			// C = Quit
 			toVisualiser <: STOP;
+			running = 0;
 			break;
 		case BTND:
 			// D = Noop
