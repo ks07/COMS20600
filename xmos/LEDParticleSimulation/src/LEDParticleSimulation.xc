@@ -218,8 +218,12 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 			break;
 		case BTNC:
 			// C = Quit
+			if (paused) {
+				toVisualiser <: BTN_PAUSE;
+			}
 			toVisualiser <: BTN_STOP;
 			running = 0;
+			paused = 0;
 			break;
 		case BTND:
 			// D = Noop
