@@ -57,12 +57,20 @@ out port speaker = PORT_SPEAKER;
 // Vis -> LED shutdown token
 #define QUAD_STOP 15
 
+#define NO_BOUND 17
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Helper Functions provided for you
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
+// % operator in C is remainder, not modulus!
+int mod12(int a) {
+	int r;
+	r = a % 12;
+	return (r >= 0) ? r : r + 12;
+}
 
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
 void showLED(out port p, chanend fromVisualiser) {
@@ -137,6 +145,9 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 		display[i] = 12;
 		partWorking = 1;
 
+		show[i] <: i == 0 ? NO_BOUND : display[i-1];
+		show[i] <: i == 0 ? NO_BOUND : mod12(display[0] - (noParticles - i - 1));
+
 		while (partWorking) {
 			toButtons :> p;
 			switch (p) {
@@ -146,8 +157,9 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 					display[i] = p;
 					break;
 				case BTN_R:
-					// TODO: Allow incrementing/right movement
-					//show[i] <: BTN_R;
+					show[i] <: BTN_R;
+					show[i] :> p;
+					display[i] = p;
 					break;
 				case BTN_CONF:
 					show[i] <: BTN_CONF;
@@ -305,13 +317,6 @@ unsigned int vToT(int velocity) {
 	return 10000000;
 }
 
-// % operator in C is remainder, not modulus!
-int mod12(int a) {
-	int r;
-	r = a % 12;
-	return (r >= 0) ? r : r + 12;
-}
-
 int isLeft(unsigned int base, unsigned int l, unsigned int r) {
 	return mod12((l - base)) > mod12((r - base));
 }
@@ -331,46 +336,38 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	unsigned int t, waitTime;
 	int shutdownRequested = 0;
 	int live = 0;
+	int leftBound, rightBound;
+
+	toVisualiser :> leftBound;
+	toVisualiser :> rightBound;
+	position = leftBound +1;
 
 	while (!live) {
 		toVisualiser :> rcvTemp;
-
-		if (startPosition == 0) {
-			switch (rcvTemp) {
-			case BTN_L:
-				position = mod12(position + LEFT);
-				break;
-			case BTN_R:
-				position = mod12(position + RIGHT);
-				break;
-			case BTN_CONF:
-				startPosition = position;
-				live = 1;
-				break;
+		switch (rcvTemp) {
+		case BTN_L:
+			attemptedPosition = mod12(position + LEFT);
+			if (leftBound == NO_BOUND || attemptedPosition != leftBound) {
+				position = attemptedPosition; //TODO: make a beep
 			}
-
-			toVisualiser <: position;
-		} else {
-			switch (rcvTemp) {
-				case BTN_L:
-					position = mod12(position + LEFT);
-					break;
-				case BTN_R:
-					//position = mod12(position + RIGHT);
-					break;
-				case BTN_CONF:
-					startPosition = position;
-					live = 1;
-					break;
-				}
-
-			toVisualiser <: position;
+			break;
+		case BTN_R:
+			attemptedPosition = mod12(position + RIGHT);
+			if (rightBound == NO_BOUND || attemptedPosition != rightBound) {
+				position = attemptedPosition;
+			}
+			break;
+		case BTN_CONF:
+			startPosition = position;
+			live = 1;
+			break;
 		}
+		toVisualiser <: position;
 	}
-	toVisualiser :> rcvTemp;
+
 	toVisualiser <: startPosition;
 	tmr :> waitTime; //First move is now.
-	//TODO: Implement setup phase, need a way of checking right movement! Maybe send position and limit move to pos + particlesRemaining?
+
 	while (live) {
 		// TODO: Prioritise reading responses over checking new requests.
 		select {
