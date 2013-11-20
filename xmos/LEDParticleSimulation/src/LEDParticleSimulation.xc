@@ -18,32 +18,43 @@ in port buttons = PORT_BUTTON;
 out port speaker = PORT_SPEAKER;
 
 // max particles of 5, any more and the number of channels on core 0 will be exceeded.
-#define noParticles 3 //overall number of particles threads in the system
+#define noParticles 4 //overall number of particles threads in the system
 
+// Direction constants
 #define LEFT -1
 #define RIGHT 1
 #define NO_DIR 0
 
+// Particle response constants
 #define MOVE_OK 16
 #define MOVE_FAIL 32
 
+// Button IO signals
 #define BTNA 14
 #define BTNB 13
 #define BTNC 11
 #define BTND 7
 
-#define BTN_START 0
-#define BTN_STOP 1
-#define BTN_PAUSE 2
+// Btn -> Vis running tokens
+#define BTN_STOP 0
+#define BTN_PAUSERES 1
 
+// Btn -> Vis setup tokens
+#define BTN_L 0
+#define BTN_R 1
+#define BTN_CONF 2
+
+// Vis particle status constants
 #define RUNNING 0
 #define SHUTDOWNPENDING 1
 #define SHUTDOWN 2
 
+// Vis -> Part running tokens
 #define PARTICLE_PREP_STOP 12
 #define PARTICLE_STOP 13
 #define PARTICLE_PAUSE 14
 
+// Vis -> LED shutdown token
 #define QUAD_STOP 15
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -112,15 +123,56 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 	int particleFlag[noParticles];
 	int shutCount = 0;
 	int finCount = 0;
-	int paused = 0;
+	int paused = 1;
+	int partWorking;
 	cledR <: 1;
-	for (j = 0; j < noParticles; j++) {
-		particleFlag[j] = RUNNING;
-		display[j] = 12;
+
+	// Switch off all LEDs.
+	for (int i = 0; i < noParticles; i++) {
+		display[i] = 12;
+	}
+
+	for (int i = 0; i < noParticles; i++) {
+		particleFlag[i] = RUNNING;
+		display[i] = 12;
+		partWorking = 1;
+
+		while (partWorking) {
+			toButtons :> p;
+			switch (p) {
+				case BTN_L:
+					show[i] <: BTN_L;
+					show[i] :> p;
+					display[i] = p;
+					break;
+				case BTN_R:
+					// TODO: Allow incrementing/right movement
+					//show[i] <: BTN_R;
+					break;
+				case BTN_CONF:
+					show[i] <: BTN_CONF;
+					show[i] :> p;
+					display[i] = p;
+					partWorking = 0;
+					break;
+			}
+
+			for (int l=0;l<4;l++) {
+				j = 0;
+				for (int k=0;k<noParticles;k++) {
+					if (display[k] < 12) {
+						j += (16<<(display[k]%3))*(display[k]/3==l);
+					}
+				}
+				toQuadrant[l] <: j;
+			}
+
+			waitMoment(50000000);
+		}
 	}
 	while (running) {
 		// Debugging check of particle ordering.
-		if (display[1] < display[0] && display[1] > display[2]) {
+		if (noParticles > 2 && display[1] < display[0] && display[1] > display[2]) {
 			printf("very bad\n");
 		}
 		for (int k=0;k<noParticles;k++) {
@@ -153,12 +205,7 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 					    case BTN_STOP:
 					    	goingShut = 1;
 					    break;
-					    case BTN_START:
-					    	for (int a=0;a<noParticles;a++) {
-					    		show[a] <: BTN_START;
-					    	}
-					    break;
-					    case BTN_PAUSE:
+					    case BTN_PAUSERES:
 					    	paused = !paused;
 					    break;
 					}
@@ -194,32 +241,52 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 void buttonListener(in port buttons, chanend toVisualiser) {
 	int buttonInput; //button pattern currently pressed
 	unsigned int running = 1; //helper variable to determine system shutdown
-	int started = 0; //TODO: combine with goingshut? Signifies if we have told everything to start or not.
-	int paused = 0;
+	int paused = 1;
+	int setupCount = noParticles;
+	while (setupCount > 0) {
+		// User is choosing starting positions of particles
+		buttons when pinsneq(15) :> buttonInput;
+		buttons when pinseq(15) :> void;
+		switch (buttonInput) {
+		case BTNA:
+			// A = move left
+			toVisualiser <: BTN_L;
+			break;
+		#pragma fallthrough
+		case BTNB:
+		case BTNC:
+			// B/C = confirm
+			toVisualiser <: BTN_CONF;
+			setupCount--;
+			break;
+		case BTND:
+			// D = move right
+			toVisualiser <: BTN_R;
+			break;
+		}
+	}
 	while (running) {
 		buttons when pinsneq(15) :> buttonInput;
+		buttons when pinseq(15) :> void;
 		switch (buttonInput) {
 		case BTNA:
 			// A = Start
-			if (!started) {
-				toVisualiser <: BTN_START;
-				started = 1;
-			} else if (paused) {
+			if (paused) {
 				paused = 0;
-				toVisualiser <: BTN_PAUSE;
+				toVisualiser <: BTN_PAUSERES;
 			}
 			break;
 		case BTNB:
 			// B = Pause
 			if (!paused) {
-				toVisualiser <: BTN_PAUSE;
+				toVisualiser <: BTN_PAUSERES;
 				paused = 1;
 			}
 			break;
 		case BTNC:
 			// C = Quit
 			if (paused) {
-				toVisualiser <: BTN_PAUSE;
+				toVisualiser <: BTN_PAUSERES;
 			}
 			toVisualiser <: BTN_STOP;
 			running = 0;
@@ -263,12 +330,47 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 	timer tmr;
 	unsigned int t, waitTime;
 	int shutdownRequested = 0;
-	int live = 1;
+	int live = 0;
 
-	toVisualiser :> rcvTemp; //Wait for start button
+	while (!live) {
+		toVisualiser :> rcvTemp;
+
+		if (startPosition == 0) {
+			switch (rcvTemp) {
+			case BTN_L:
+				position = mod12(position + LEFT);
+				break;
+			case BTN_R:
+				position = mod12(position + RIGHT);
+				break;
+			case BTN_CONF:
+				startPosition = position;
+				live = 1;
+				break;
+			}
+
+			toVisualiser <: position;
+		} else {
+			switch (rcvTemp) {
+				case BTN_L:
+					position = mod12(position + LEFT);
+					break;
+				case BTN_R:
+					//position = mod12(position + RIGHT);
+					break;
+				case BTN_CONF:
+					startPosition = position;
+					live = 1;
+					break;
+				}
+
+			toVisualiser <: position;
+		}
+	}
+	toVisualiser :> rcvTemp;
 	toVisualiser <: startPosition;
 	tmr :> waitTime; //First move is now.
-
+	//TODO: Implement setup phase, need a way of checking right movement! Maybe send position and limit move to pos + particlesRemaining?
 	while (live) {
 		// TODO: Prioritise reading responses over checking new requests.
 		select {
