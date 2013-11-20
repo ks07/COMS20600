@@ -27,7 +27,8 @@ out port speaker = PORT_SPEAKER;
 
 // Particle response constants
 #define MOVE_OK 16
-#define MOVE_FAIL 32
+#define MOVE_FAIL_CRASH 32
+#define MOVE_FAIL_REAR 64
 
 // Button IO signals
 #define BTNA 14
@@ -147,28 +148,10 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 
 		show[i] <: i == 0 ? NO_BOUND : display[i-1];
 		show[i] <: i == 0 ? NO_BOUND : mod12(display[0] - (noParticles - i - 1));
+		show[i] :> display[i];
 
 		while (partWorking) {
-			toButtons :> p;
-			switch (p) {
-				case BTN_L:
-					show[i] <: BTN_L;
-					show[i] :> p;
-					display[i] = p;
-					break;
-				case BTN_R:
-					show[i] <: BTN_R;
-					show[i] :> p;
-					display[i] = p;
-					break;
-				case BTN_CONF:
-					show[i] <: BTN_CONF;
-					show[i] :> p;
-					display[i] = p;
-					partWorking = 0;
-					break;
-			}
-
+			// Display particle.
 			for (int l=0;l<4;l++) {
 				j = 0;
 				for (int k=0;k<noParticles;k++) {
@@ -177,6 +160,35 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 					}
 				}
 				toQuadrant[l] <: j;
+			}
+
+			toButtons :> p;
+			switch (p) {
+				case BTN_L:
+					show[i] <: BTN_L;
+					show[i] :> p;
+					if (p < 12) {
+						display[i] = p;
+					} else {
+						playSound(20000,20,speaker);
+					}
+					break;
+				case BTN_R:
+					show[i] <: BTN_R;
+					show[i] :> p;
+					if (p < 12) {
+						display[i] = p;
+					} else {
+						playSound(20000,20,speaker);
+					}
+					break;
+				case BTN_CONF:
+					show[i] <: BTN_CONF;
+					show[i] :> p;
+					display[i] = p;
+					playSound(200000,20,speaker);
+					partWorking = 0;
+					break;
 			}
 
 			waitMoment(50000000);
@@ -306,32 +318,38 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 			break;
 		case BTND:
 			// D = Noop
-			//TODO: Extra stuff?
 			break;
 		}
 	}
 }
 
-unsigned int vToT(int velocity) {
-	// TODO: Return a function of v.
-	return 10000000;
-}
+//unsigned int vToT(int velocity) {
+//	return 10000000 / velocity;
+//}
 
-int isLeft(unsigned int base, unsigned int l, unsigned int r) {
-	return mod12((l - base)) > mod12((r - base));
+unsigned int sanitiseVelocity(unsigned int vel) {
+	if (vel <= 1000000) {
+		// If more than 10 times faster, revert to 10x speed.
+		return 1000000;
+	} else if (vel >= 100000000) {
+		// If less than 10 times slower, revert.
+		return 100000000;
+	} else {
+		return vel;
+	}
 }
 
 //PARTICLE...thread to represent a particle - to be replicated noParticle-times
-void particle(streaming chanend left, streaming chanend right, chanend toVisualiser, int startPosition, int startDirection) {
+void particle(streaming chanend left, streaming chanend right, chanend toVisualiser, int startPosition, int startDirection, unsigned int startVelocity) {
 	unsigned int moveCounter = 0; //overall no of moves performed by particle so far
 	int position = startPosition; //the current particle position
 	int attemptedPosition; //the next attempted position after considering move direction
 	int currentDirection = startDirection; //the current direction the particle is moving
 	int leftMoveForbidden = 0; //the verdict of the left neighbour if move is allowed
 	int rightMoveForbidden = 0; //the verdict of the right neighbour if move is allowed
-	int currentVelocity = 1; //the current particle velocity
+	unsigned int currentVelocity = startVelocity; //the current particle velocity (old default = 10000000)
 	int waitingOn = NO_DIR; // -1 if waiting for left resp, 1 if right, 0 if no req sent
-	int rcvTemp; //temp var to hold messages
+	int rcvTemp; //temp var to hold messagesy
 	timer tmr;
 	unsigned int t, waitTime;
 	int shutdownRequested = 0;
@@ -340,7 +358,8 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 
 	toVisualiser :> leftBound;
 	toVisualiser :> rightBound;
-	position = leftBound +1;
+	position = mod12(leftBound + 1);
+	toVisualiser <: position;
 
 	while (!live) {
 		toVisualiser :> rcvTemp;
@@ -349,20 +368,29 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 			attemptedPosition = mod12(position + LEFT);
 			if (leftBound == NO_BOUND || attemptedPosition != leftBound) {
 				position = attemptedPosition; //TODO: make a beep
+				toVisualiser <: position;
+			} else {
+				toVisualiser <: 10000; // Make a beep.
 			}
 			break;
 		case BTN_R:
 			attemptedPosition = mod12(position + RIGHT);
 			if (rightBound == NO_BOUND || attemptedPosition != rightBound) {
 				position = attemptedPosition;
+				toVisualiser <: position;
+			} else {
+				toVisualiser <: 10000; // Make a beep.
 			}
 			break;
 		case BTN_CONF:
 			startPosition = position;
 			live = 1;
+			toVisualiser <: position;
+			break;
+		default:
+			toVisualiser <: position;
 			break;
 		}
-		toVisualiser <: position;
 	}
 
 	toVisualiser <: startPosition;
@@ -372,7 +400,6 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 		// TODO: Prioritise reading responses over checking new requests.
 		select {
 			case toVisualiser :> rcvTemp:
-				printf("p %d Rcv from vis: %d\n", startPosition, rcvTemp);
 				if (rcvTemp == PARTICLE_PREP_STOP) {
 					shutdownRequested = 1;
 				} else if (rcvTemp == PARTICLE_STOP) {
@@ -389,13 +416,16 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 							position = attemptedPosition;
 							// Increment move counter.
 							moveCounter++;
-						} else {
+						} else if (rcvTemp == MOVE_FAIL_CRASH) {
 							// We have crashed, change direction.
 							currentDirection *= -1;
+						} else {
+							// We have rear ended, change direction and slow down.
+							currentVelocity = sanitiseVelocity(currentVelocity + 200000);
 						}
 						toVisualiser <: position;
 						tmr :> t;
-						waitTime = t + vToT(currentVelocity);
+						waitTime = t + currentVelocity;
 					}
 					waitingOn = NO_DIR;
 					break;
@@ -406,7 +436,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 					}
 					if (rcvTemp == position) {
 						// The left particle is trying to move into us, crash it. We are moving away from it already, so we simply continue.
-						left <: MOVE_FAIL;
+						left <: MOVE_FAIL_REAR;
 					} else {
 						left <: MOVE_OK;
 					}
@@ -420,10 +450,11 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 						// Head on collision. Bounce.
 						currentDirection *= -1;
 						attemptedPosition = position;
-						left <: MOVE_FAIL;
+						left <: MOVE_FAIL_CRASH;
 					} else if (rcvTemp == position) {
 						// Rear ended. Push back the other but stay on course.
-						left <: MOVE_FAIL;
+						currentVelocity = sanitiseVelocity(currentVelocity - 200000);
+						left <: MOVE_FAIL_REAR;
 					} else {
 						// Left is in the clear.
 						left <: MOVE_OK;
@@ -442,13 +473,16 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 								position = attemptedPosition;
 								// Increment move counter.
 								moveCounter++;
-							} else {
+							} else if (rcvTemp == MOVE_FAIL_CRASH) {
 								// We have crashed, change direction.
 								currentDirection *= -1;
+							} else {
+								// We have rear ended, change direction and slow down.
+								currentVelocity = sanitiseVelocity(currentVelocity + 200000);
 							}
 							toVisualiser <: position;
 							tmr :> t;
-							waitTime = t + vToT(currentVelocity);
+							waitTime = t + currentVelocity;
 
 						}
 						waitingOn = NO_DIR;
@@ -460,7 +494,7 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 						}
 						if (rcvTemp == position) {
 							// The left particle is trying to move into us, crash it. We are moving away from it already, so we simply continue.
-							right <: MOVE_FAIL;
+							right <: MOVE_FAIL_REAR;
 						} else {
 							right <: MOVE_OK;
 						}
@@ -474,10 +508,11 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 							// Head on collision. Bounce.
 							currentDirection *= -1;
 							attemptedPosition = position;
-							right <: MOVE_FAIL;
+							right <: MOVE_FAIL_CRASH;
 						} else if (rcvTemp == position) {
 							// Rear ended. Push back the other but stay on course.
-							right <: MOVE_FAIL;
+							currentVelocity = sanitiseVelocity(currentVelocity + 200000);
+							right <: MOVE_FAIL_REAR;
 						} else {
 							// Right is in the clear.
 							right <: MOVE_OK;
@@ -488,14 +523,13 @@ void particle(streaming chanend left, streaming chanend right, chanend toVisuali
 				default:
 					tmr :> t;
 
-					if (t >= waitTime && waitingOn != NO_DIR) {
+					//if (t >= waitTime && waitingOn != NO_DIR) {
 						//printf("particle %d in pos %d has timed out waiting for %d\n", startPosition, position, waitingOn);
-					}
+					//}
 					// If we're waiting to shutdown, we should never send.
 					if (t >= waitTime && waitingOn == NO_DIR && !shutdownRequested) {
 						// Request to move.
 						attemptedPosition = mod12(position + currentDirection);
-//						waitTime = t + vToT(currentVelocity);
 
 						switch (currentDirection) {
 						case LEFT:
@@ -532,7 +566,7 @@ int main(void) {
 		on stdcore[0]: buttonListener(buttons,buttonToVisualiser);
 
 		par (int i=0;i<noParticles;i++) {
-			on stdcore[i%4]: particle(neighbours[i], neighbours[(i+1) % noParticles], show[i], ((12/noParticles)*i) % 12, (i & 1) ? -1 : 1);
+			on stdcore[i%4]: particle(neighbours[i], neighbours[(i+1) % noParticles], show[i], ((12/noParticles)*i) % 12, (i & 1) ? -1 : 1, 10000000 + i*200000);
 		}
 
 		//VISUALISER THREAD
