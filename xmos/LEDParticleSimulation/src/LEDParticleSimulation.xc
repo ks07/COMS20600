@@ -34,6 +34,7 @@ out port speaker = PORT_SPEAKER;
 
 #define BTN_START 0
 #define BTN_STOP 1
+#define BTN_PAUSE 2
 
 #define RUNNING 0
 #define SHUTDOWNPENDING 1
@@ -41,6 +42,7 @@ out port speaker = PORT_SPEAKER;
 
 #define PARTICLE_PREP_STOP 12
 #define PARTICLE_STOP 13
+#define PARTICLE_PAUSE 14
 
 #define QUAD_STOP 15
 
@@ -110,13 +112,13 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 	int particleFlag[noParticles];
 	int shutCount = 0;
 	int finCount = 0;
+	int paused = 0;
 	cledR <: 1;
 	for (j = 0; j < noParticles; j++) {
 		particleFlag[j] = RUNNING;
 		display[j] = 12;
 	}
 	while (running) {
-
 		// Debugging check of particle ordering.
 		if (display[1] < display[0] && display[1] > display[2]) {
 			printf("very bad\n");
@@ -125,6 +127,7 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 			select {
 				//TODO: Kill off particles once all have been notified.
 				case show[k] :> j:
+					if(!paused) {
 					if (goingShut && particleFlag[k] == RUNNING) {
 						// We've been asked to shutdown, inform the current particle it should prepare to quit.
 						show[k] <: PARTICLE_PREP_STOP;
@@ -133,12 +136,13 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 					} else if (j<12) {
 						// Sent a valid position.
 						display[k] = j;
-					} else if (j < 14) {
+					} else if (j < 15) {
 						// Sent a reserved message value.
 						printf("INVALID\n");
 					} else {
 						// Sent a high, play a sound.
 						playSound(20000,20,speaker);
+					}
 					}
 				break;
 				case toButtons :> p:
@@ -150,6 +154,9 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 					    	for (int a=0;a<noParticles;a++) {
 					    		show[a] <: BTN_START;
 					    	}
+					    break;
+					    case BTN_PAUSE:
+					    	paused = !paused;
 					    break;
 					}
 				break;
@@ -187,11 +194,6 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 	int started = 0; //TODO: combine with goingshut? Signifies if we have told everything to start or not.
 	while (running) {
 		buttons when pinsneq(15) :> buttonInput;
-		///////////////////////////////////////////////////////////////////////
-		//
-		// ADD YOUR CODE HERE TO ACT ON BUTTON INPUT
-		//
-		///////////////////////////////////////////////////////////////////////
 		switch (buttonInput) {
 		case BTNA:
 			// A = Start
@@ -201,8 +203,8 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 			}
 			break;
 		case BTNB:
-			// B = Pause/Restart
-
+			// B = Pause
+			toVisualiser <: BTN_PAUSE;
 			break;
 		case BTNC:
 			// C = Quit
@@ -211,7 +213,7 @@ void buttonListener(in port buttons, chanend toVisualiser) {
 			break;
 		case BTND:
 			// D = Noop
-			//TODO: Extra stuff
+			//TODO: Extra stuff?
 			break;
 		}
 	}
