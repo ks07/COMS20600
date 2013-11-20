@@ -18,7 +18,7 @@ in port buttons = PORT_BUTTON;
 out port speaker = PORT_SPEAKER;
 
 // max particles of 5, any more and the number of channels on core 0 will be exceeded.
-#define noParticles 4 //overall number of particles threads in the system
+#define noParticles 3 //overall number of particles threads in the system
 
 // Direction constants
 #define LEFT -1
@@ -124,6 +124,56 @@ void waitMoment(uint myTime) {
 // RELEVANT PART OF CODE TO EXPAND
 //
 /////////////////////////////////////////////////////////////////////////////////////////
+
+void showShutdownPattern(chanend quad0, chanend quad1, chanend quad2, chanend quad3, out port cledR, out port cledG) {
+	// Displays a beautiful pattern on LEDs.
+	timer tmr;
+	unsigned int t;
+	int setOn[12];
+	int pat0, pat1, pat2, pat3, t0, j, c;
+
+    // Initialise lights array to turn on all LEDs
+	for (int i = 0; i < 12; i++) {
+		setOn[i] = i;
+	}
+
+	pat0 = pat1 = pat2 = pat3 = 0;
+
+	// Use j to hold toggle
+	j = 0;
+
+	// Colour toggle
+	c = 0;
+
+	// The game is over, blink LEDs & switch off after some time
+	for (int i = 0; i <= 16; i++) {
+		tmr :> t;
+		t += 50000000;
+		tmr when timerafter(t) :> void; // Feed into void to throw away value.
+
+		for (int k = 0; k < (j ? 12 : 0); k++) {
+			t0 = 16 << (setOn[k] % 3);
+			pat0 = (t0 * ((setOn[k] / 3) == 0)) | pat0;
+			pat1 = (t0 * ((setOn[k] / 3) == 1)) | pat1;
+			pat2 = (t0 * ((setOn[k] / 3) == 2)) | pat2;
+			pat3 = (t0 * ((setOn[k] / 3) == 3)) | pat3;
+		}
+
+		quad0 <: pat0;
+		quad1 <: pat1;
+		quad2 <: pat2;
+		quad3 <: pat3;
+
+
+		j = !j;
+
+		if (i & 1 == 1) {
+			cledR <: c;
+			c = !c;
+			cledG <: c;
+		}
+	}
+}
 
 //PROCESS TO COORDINATE DISPLAY of LED Particles
 void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out port speaker) {
@@ -258,6 +308,9 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 			}
 		}
 	}
+
+	showShutdownPattern(toQuadrant[0], toQuadrant[1], toQuadrant[2], toQuadrant[3], cledR, cledG);
+
 	for (int i=0;i<4;i++) {
 		toQuadrant[i] <: QUAD_STOP;
 	}
