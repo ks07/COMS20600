@@ -126,20 +126,18 @@ void visualiser(chanend toButtons, chanend show[], chanend toQuadrant[], out por
 				//TODO: Kill off particles once all have been notified.
 				case show[k] :> j:
 					if (goingShut && particleFlag[k] == RUNNING) {
+						// We've been asked to shutdown, inform the current particle it should prepare to quit.
 						show[k] <: PARTICLE_PREP_STOP;
 						particleFlag[k] = SHUTDOWNPENDING;
 						shutCount++;
-					} else if (shutCount == noParticles && particleFlag[k] != SHUTDOWN) {
-						// TODO: Remove me?
-						// All particles have been told to prep shutdown. Inform them to shut down.
-						show[k] <: PARTICLE_STOP;
-						particleFlag[k] = SHUTDOWN;
-						finCount++;
 					} else if (j<12) {
+						// Sent a valid position.
 						display[k] = j;
 					} else if (j < 14) {
+						// Sent a reserved message value.
 						printf("INVALID\n");
 					} else {
+						// Sent a high, play a sound.
 						playSound(20000,20,speaker);
 					}
 				break;
