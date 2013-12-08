@@ -20,3 +20,5 @@
 # Eclipse
 .metadata
 bin/
+.build_Debug/
+.settings/
