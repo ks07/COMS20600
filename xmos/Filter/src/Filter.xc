@@ -16,6 +16,14 @@ typedef unsigned char uchar;
 #define IMHT 16
 #define IMWD 16
 
+// USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
+// NE = N & E
+#define N 1
+#define E 2
+#define S 4
+#define W 8
+
+#define BLOCKSIZE 130*130 //ENLARGE FOR GREATER THAN 256 * 256, CURRENTLY (256*256)/4
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -58,6 +66,8 @@ void DataInStream(char infname[], chanend c_out)
 // Start your implementation by changing this function to farm out parts of the image...
 //
 /////////////////////////////////////////////////////////////////////////////////////////
+
+// INSERTING TWO EXTRA PIXELS TO ACCOUNT FOR OVERLAP
 void distributor(chanend c_in, chanend c_out)
 {
     uchar val;
@@ -109,6 +119,41 @@ void DataOutStream(char outfname[], chanend c_in)
     _closeoutpgm();
     printf( "DataOutStream:Done...\n" );
     return;
+}
+
+void Collector(chanend fromWorker[], chanend dataOut){
+
+}
+
+unsigned int ind(unsigned int x, unsigned int y, unsigned int size) {
+	return (y * size) + x;
+}
+
+int endline(unsigned int i, unsigned int size) {
+	int x = i % size;
+	return x == size - 2;
+}
+
+void Worker(chanend fromDistributor, chanend toCollector)
+{
+	char pos;
+	int size; //ASSUME SQUARE FOR NOW
+	unsigned int x, y, i, temp;
+	char block[BLOCKSIZE];
+
+	fromDistributor :> size;
+	fromDistributor :> pos;
+
+	for (i = 0; i < size * size; i++) {
+		fromDistributor :> block[i];
+	}
+
+	// Do work on inner pixels only
+	for (i = ind(1,1,size); i <= ind(size-2,size-2,size); endline(i, size) ? i += 3 : i++) {
+		temp = (block[i + 1] + block[i - 1] + block[i + size] + block[i - size] + block[i + size + 1] + block[i + size - 1] + block[i - size + 1] + block[i - size - 1] + block[i]) / 9;
+		toCollector <: temp;
+	}
+
 }
 
 
