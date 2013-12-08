@@ -115,8 +115,8 @@ void DataOutStream(char outfname[], chanend c_in)
 //MAIN PROCESS defining channels, orchestrating and starting the threads
 int main()
 {
-    char infname[] = "D:\\test.pgm"; //put your input image path here
-    char outfname[] = "D:\\testout.pgm"; //put your output image path here
+    char infname[] = "src/test0.pgm"; //put your input image path here
+    char outfname[] = "bin/testout.pgm"; //put your output image path here
     chan c_inIO, c_outIO; //extend your channel definitions here
 
     par //extend/change this par statement to implement your concurrent filter
@@ -129,5 +129,5 @@ int main()
     printf( "Main:Done...\n" );
 
     return 0;
-} 
+}
 
