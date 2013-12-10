@@ -23,7 +23,10 @@ typedef unsigned char uchar;
 #define S 4
 #define W 8
 
-#define BLOCKSIZE 130*130 //ENLARGE FOR GREATER THAN 256 * 256, CURRENTLY (256*256)/4
+#define BLACK 0
+
+#define WORKERNO 4
+#define BLOCKSIZE (IMHT + 2) * (IMWD + 2) / WORKERNO //130*130 //ENLARGE FOR GREATER THAN 256 * 256, CURRENTLY (256*256)/4
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -68,19 +71,32 @@ void DataInStream(char infname[], chanend c_out)
 /////////////////////////////////////////////////////////////////////////////////////////
 
 // INSERTING TWO EXTRA PIXELS TO ACCOUNT FOR OVERLAP
-void distributor(chanend c_in, chanend c_out)
+void distributor(chanend toWorker[], chanend c_in)
 {
     uchar val;
+    int i = 0;
 
     printf( "ProcessImage:Start, size = %dx%d\n", IMHT, IMWD );
 
     //This code is to be replaced – it is a place holder for farming out the work...
-    for( int y = 0; y < IMHT; y++ )
+    for (int i = 0; i < WORKERNO; i++) {
+    	toWorker[i] <: (int)(IMHT + 2) /2;
+    	toWorker[i] <: (char)0;
+    }
+
+
+    for( int y = -1; y < IMHT + 1; y++ )
     {
-        for( int x = 0; x < IMWD; x++ )
+        for( int x = -1; x < IMWD + 1; x++ )
         {
-            c_in :> val;
-            c_out <: (uchar)( val ^ 0xFF ); //Need to cast
+        	if (y < 0 || y >= IMHT || x < 0 || x >= IMWD) {
+        		val = BLACK;
+        	} else {
+        		c_in :> val;
+        	}
+            toWorker[i] <: val;
+            i = (i + 1) % WORKERNO;
+//            c_out <: (uchar)( val ^ 0xFF ); //Need to cast
         }
     }
     printf( "ProcessImage:Done...\n" );
@@ -121,8 +137,23 @@ void DataOutStream(char outfname[], chanend c_in)
     return;
 }
 
-void Collector(chanend fromWorker[], chanend dataOut){
+void collector(chanend fromWorker[], chanend dataOut){
+	char tmp;
+	int i;
 
+	while (1) {
+	for (i=0;i<WORKERNO;i++) {
+		select {
+			case fromWorker[i] :> tmp:
+				printf("%d gave us %i\n", i, tmp);
+				break;
+			default:
+				break;
+		}
+	}
+	}
+
+	printf("Collector quitting.");
 }
 
 unsigned int ind(unsigned int x, unsigned int y, unsigned int size) {
@@ -134,16 +165,17 @@ int endline(unsigned int i, unsigned int size) {
 	return x == size - 2;
 }
 
-void Worker(chanend fromDistributor, chanend toCollector)
+void worker(chanend fromDistributor, chanend toCollector)
 {
-	char pos;
+	char pos; // TODO: Not needed anymore?
 	int size; //ASSUME SQUARE FOR NOW
-	unsigned int x, y, i, temp;
+	unsigned int x, y, i;
+	char temp;
 	char block[BLOCKSIZE];
 
 	fromDistributor :> size;
 	fromDistributor :> pos;
-
+// not square
 	for (i = 0; i < size * size; i++) {
 		fromDistributor :> block[i];
 	}
@@ -158,20 +190,21 @@ void Worker(chanend fromDistributor, chanend toCollector)
 
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
-int main()
-{
-    char infname[] = "src/test0.pgm"; //put your input image path here
-    char outfname[] = "bin/testout.pgm"; //put your output image path here
-    chan c_inIO, c_outIO; //extend your channel definitions here
+int main() {
+//    char infname[] = "src/test0.pgm"; //put your input image path here
+//    char outfname[] = "bin/testout.pgm"; //put your output image path here
+    chan c_inIO, c_outIO, dataOut, fromWorker[WORKERNO], toWorker[WORKERNO]; //extend your channel definitions here
 
     par //extend/change this par statement to implement your concurrent filter
     {
-        DataInStream( infname, c_inIO );
-        distributor( c_inIO, c_outIO );
-        DataOutStream( outfname, c_outIO );
+        on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
+        on stdcore[0]: distributor( toWorker, c_inIO );
+        on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
+        on stdcore[0]: collector(fromWorker, c_outIO);
+        par (int i=0;i<WORKERNO;i++) {
+        	on stdcore[i%4] : worker(toWorker[i], fromWorker[i]);
+        }
     }
-
-    printf( "Main:Done...\n" );
 
     return 0;
 }
