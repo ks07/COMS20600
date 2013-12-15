@@ -13,8 +13,8 @@ typedef unsigned char uchar;
 #include <stdio.h>
 #include "pgmIO.h"
 
-#define IMHT 16
-#define IMWD 16
+#define IMHT 256
+#define IMWD 400
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -26,7 +26,12 @@ typedef unsigned char uchar;
 #define BLACK 0
 
 #define WORKERNO 4
-#define BLOCKSIZE (IMWD) * ((IMHT / WORKERNO) + 2) //130*130 //ENLARGE FOR GREATER THAN 256 * 256, CURRENTLY (256*256)/4
+#define SLICEH 5
+#define NSLICE (int)(IMHT/SLICEH)
+//#define BLOCKSIZE (IMWD) * ((IMHT / WORKERNO) + 2) //130*130 //ENLARGE FOR GREATER THAN 256 * 256, CURRENTLY (256*256)/4
+#define BLOCKSIZE IMWD * SLICEH
+
+#define WORKER_RDY -1
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -71,25 +76,72 @@ void DataInStream(char infname[], chanend c_out)
 /////////////////////////////////////////////////////////////////////////////////////////
 
 // INSERTING TWO EXTRA PIXELS TO ACCOUNT FOR OVERLAP
-void distributor(chanend toWorker[], chanend c_in)
-{
+void distributor(chanend toWorker[], chanend c_in) {
     uchar val;
-    int i = 0;
-    // TODO: Fix when not an integer
-    int sliceH = IMHT / WORKERNO;
+    int i, pc, wc, pwc, slicesDone, currWorker;
+    int first = 1;
+    int sCount = 1; // The last slice we sent a size to.
+
+    int workerLen[WORKERNO];
+
     printf( "ProcessImage:Start, size = %dx%d\n", IMHT, IMWD );
 
+    for (slicesDone = 0; slicesDone <= NSLICE; slicesDone++) {
+		for (pwc = 0; pwc < workerLen[slicesDone]; pwc++) {
+			c_in :> val;
+			toWorker[slicesDone] <: val;
+		}
+		currWorker = (currWorker + 1) % WORKERNO;
+	}
+
+    /*    	for (i = 0; i < WORKERNO; i++) {
+    		toWorker[i] <: (int) IMWD;
+    		if (first && sCount == NSLICE) {
+    			toWorker[i] <: SLICEH - 2;
+    			toWorker[i] <: (char) (N | E | S | W);
+    			i = WORKERNO;
+    			workerLen[i] = (SLICEH - 2) * IMWD;
+    		} else if (first) {
+    			toWorker[i] <: SLICEH - 1;
+        		toWorker[i] <: (char) (N | E | W);
+    			first = 0;
+    			workerLen[i] = (SLICEH - 1) * IMWD;
+    		} else if (sCount == NSLICE) {
+    			toWorker[i] <: SLICEH - 1;
+    			toWorker[i] <: (char) (S | E | W);
+    			i = WORKERNO;
+    			workerLen[i] = (SLICEH - 1) * IMWD;
+    		} else {
+    			toWorker[i] <: SLICEH;
+    			toWorker[i] <: (char) (E | W);
+    			workerLen[i] = SLICEH * IMWD;
+    		}
+    		sCount++;
+    	}
+
+    	for (slicesDone = 0; slicesDone <= NSLICE; slicesDone++) {
+    		for (pwc = 0; pwc < workerLen[slicesDone]; pwc++) {
+    			c_in :> val;
+    			toWorker[slicesDone] <: val;
+    		}
+    		currWorker = (currWorker + 1) % WORKERNO;
+    	}
+*/
+
+
+
+    /*
 
     toWorker[i] <: (int)IMWD;
-    toWorker[i] <: sliceH + 1;
+    toWorker[i] <: SLICEH + 1;
     toWorker[i] <: (char)(N | E | W);
     for (i++; i < WORKERNO - 1; i++) {
     	toWorker[i] <: (int)IMWD;
-    	toWorker[i] <: (int)sliceH + 2;
+    	toWorker[i] <: (int)SLICEH + 2;
     	toWorker[i] <: (char)(E | W);
     }
     toWorker[i] <: (int)IMWD;
-    toWorker[i] <: sliceH + 1;
+    toWorker[i] <: SLICEH + 1;
     toWorker[i] <: (char)(S | E | W);
 
     i = 0;
@@ -98,20 +150,21 @@ void distributor(chanend toWorker[], chanend c_in)
         for( int x = 0; x < IMWD; x++ )
         {
         	c_in :> val;
-        	toWorker[i] <: val;
-        	if ((y % sliceH) == (sliceH - 1) && y != (IMHT - 1)) {
+        	toWorker[i % WORKERNO] <: val;
+        	if ((y % SLICEH) == (SLICEH - 1) && y != (IMHT - 1)) {
         		// If at bottom of slice, need to send to next slice.
-        		toWorker[i + 1] <: val;
-        	} else if ((y % sliceH) == 0 && y != 0) {
+        		toWorker[(i + 1) % WORKERNO] <: val;
+        	} else if ((y % SLICEH) == 0 && y != 0) {
         		// If at top of slice, send the current row to the previous slice too.
-        		toWorker[i - 1] <: val;
+        		toWorker[(i - 1) % WORKERNO] <: val;
         	}
         }
-        if ((y % sliceH) == (sliceH - 1)) {
+        if ((y % SLICEH) == (SLICEH - 1)) {
         	// If after looping through X on the bottom of a slice, we should target the next slice.
         	i++;
         }
     }
+    */
     printf( "ProcessImage:Done...\n" );
 }
 
@@ -164,21 +217,6 @@ void collector(chanend fromWorker[], chanend dataOut){
 		}
 	}
 
-//	while (pc < (IMHT * IMWD)) {
-//		for (i=0;i<WORKERNO;i++) {
-//			select {
-//				case fromWorker[i] :> tmp:
-//					printf("%d gave us %i\n", i, tmp);
-//					pc++;
-//					dataOut <: tmp;
-//					break;
-//				default:
-//					break;
-//			}
-//		}
-//	}
-
-
 	printf("Collector quitting.\n");
 }
 
@@ -198,52 +236,54 @@ void worker(chanend fromDistributor, chanend toCollector)
 	char temp;
 	char block[BLOCKSIZE];
 
+	fromDistributor <: WORKER_RDY;
 	fromDistributor :> width;
 	fromDistributor :> height;
-	fromDistributor :> pos;
 
-	for (i = 0; i < height * width; i++) {
-		fromDistributor :> block[i];
-	}
+	while (width > 0 && height > 0) {
+		fromDistributor :> pos;
 
-	// Do work on inner pixels only
-	if (pos & N && pos & W) {
-		i = 0;
-	} else if (pos & N) {
-		i = ind(1, 0, width);
-	} else if (pos & W) {
-		i = ind(0, 1, width);
-	} else {
-		i = ind(1, 1, width);
-	}
-
-	x = (pos & E) ? width : width - 1;
-	y = (pos & S) ? height - 1 : height - 2;
-
-	if (pos & E && pos & W) {
-		jump = 1;
-	} else if ((pos & E) || (pos & W)) {
-		jump = 2;
-	} else {
-		jump = 3;
-	}
-
-	for (; i < ind(x, y, width); ((i % width) == x - 1) ? i += jump : i++) {
-		if (onedge(i, width, height)) {
-			temp = 0;
-		} else {
-			temp = (block[i + 1] + block[i - 1] + block[i + width] + block[i - width] + block[i + width + 1] + block[i + width - 1] + block[i - width + 1] + block[i - width - 1] + block[i]) / 9;
-//			printf("SHIT\n");
+		for (i = 0; i < height * width; i++) {
+			fromDistributor :> block[i];
 		}
-		toCollector <: temp;
+
+		// Do work on inner pixels only
+		if (pos & N && pos & W) {
+			i = 0;
+		} else if (pos & N) {
+			i = ind(1, 0, width);
+		} else if (pos & W) {
+			i = ind(0, 1, width);
+		} else {
+			i = ind(1, 1, width);
+		}
+
+		x = (pos & E) ? width : width - 1;
+		y = (pos & S) ? height - 1 : height - 2;
+
+		if (pos & E && pos & W) {
+			jump = 1;
+		} else if ((pos & E) || (pos & W)) {
+			jump = 2;
+		} else {
+			jump = 3;
+		}
+
+		for (; i < ind(x, y, width); ((i % width) == x - 1) ? i += jump : i++) {
+			if (onedge(i, width, height)) {
+				temp = 0;
+			} else {
+				temp = (block[i + 1] + block[i - 1] + block[i + width] + block[i - width] + block[i + width + 1] + block[i + width - 1] + block[i - width + 1] + block[i - width - 1] + block[i]) / 9;
+			}
+			toCollector <: temp;
+		}
+
+		fromDistributor <: WORKER_RDY;
+		fromDistributor :> width;
+		fromDistributor :> height;
 	}
 
 	printf("blur loop done\n");
-	//	for (i = ind(1,1,size); i <= ind(size-2,size-2,size); endline(i, size) ? i += 3 : i++) {
-//		temp = (block[i + 1] + block[i - 1] + block[i + size] + block[i - size] + block[i + size + 1] + block[i + size - 1] + block[i - size + 1] + block[i - size - 1] + block[i]) / 9;
-//		toCollector <: temp;
-//	}
-
 }
 
 
@@ -255,7 +295,7 @@ int main() {
 
     par //extend/change this par statement to implement your concurrent filter
     {
-        on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
+        on stdcore[0]: DataInStream( "src/BristolCathedral.pgm", c_inIO );
         on stdcore[0]: distributor( toWorker, c_inIO );
         on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
         on stdcore[0]: collector(fromWorker, c_outIO);
