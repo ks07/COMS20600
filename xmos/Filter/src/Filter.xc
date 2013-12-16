@@ -13,8 +13,8 @@ typedef unsigned char uchar;
 #include <stdio.h>
 #include "pgmIO.h"
 
-#define IMHT 256
-#define IMWD 400
+#define IMHT 16//256
+#define IMWD 16//400
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -29,7 +29,7 @@ typedef unsigned char uchar;
 #define SLICEH 3
 #define NSLICE (IMHT/SLICEH)
 //#define BLOCKSIZE (IMWD) * ((IMHT / WORKERNO) + 2) //130*130 //ENLARGE FOR GREATER THAN 256 * 256, CURRENTLY (256*256)/4
-#define BLOCKSIZE (IMWD * SLICEH)
+#define BLOCKSIZE (IMWD * (SLICEH+2))
 
 #define WORKER_RDY 1
 
@@ -77,11 +77,11 @@ void DataInStream(char infname[], chanend c_out)
 
 int getWaiting(chanend workers[]) {
     int waiting, i, temp;
-    i = -1;
-//    while (waiting < 0 && waiting >= WORKERNO) {
-
-      select {
-            workers[i] :> temp:
+    i = 0;
+    waiting = -1;
+    while (waiting < 0 || waiting >= WORKERNO) {
+        select {
+            case workers[i] :> temp:
                 if (temp == WORKER_RDY) {
                     waiting = i;
                 } else {
@@ -90,20 +90,48 @@ int getWaiting(chanend workers[]) {
                 break;
             default:
                 break;
-        }
-        ++i;
-//    }
+            }
+        i = (i + 1) % WORKERNO;
+    }
+    return waiting;
 }
 
 // INSERTING TWO EXTRA PIXELS TO ACCOUNT FOR OVERLAP
 void distributor(chanend toWorker[], chanend c_in) {
-    uchar val;
-    int cWorker, x, y, workRemaining;
+    int cWorker, x, y, workRemaining, height;
     uchar sentLine[IMWD];
-
-
-
-
+    for (workRemaining = NSLICE; workRemaining > 1; workRemaining--) {
+        cWorker = getWaiting(toWorker);
+        // height gives number of rows the worker must OUTPUT (i.e. input + 2)
+        toWorker[cWorker] <: IMWD;
+        toWorker[cWorker] <: height;
+        toWorker[cWorker] <: (char) (E | W);
+        for (x = 0; x < IMWD; x++) {
+            toWorker[cWorker] <: sentLine[x];
+        }
+        for (y = 0; y < height + 1; y++) {
+            for (x = 0; x < IMWD; x++) {
+                c_in :> sentLine[x];
+                toWorker[cWorker] <: sentLine[x];
+            }
+        }
+    }
+    cWorker = getWaiting(toWorker);
+    toWorker[cWorker] <: IMWD;
+    toWorker[cWorker] <: IMHT % SLICEH;
+    toWorker[cWorker] <: (char) (S | E | W);
+    for (x = 0; x < IMWD; x++) {
+        toWorker[cWorker] <: sentLine[x];
+    }
+    for (y = 0; y < IMHT % SLICEH; y++) {
+        for (x = 0; x < IMWD; x++) {
+            c_in :> sentLine[x];
+            toWorker[cWorker] <: sentLine[x];
+        }
+    }
+    for (x = 0; x < IMWD; x++) {
+        toWorker[cWorker] <: (char)0;
+    }
     printf( "ProcessImage:Done...\n" );
 }
 
@@ -177,13 +205,12 @@ void worker(chanend fromDistributor, chanend toCollector)
 
 	fromDistributor <: WORKER_RDY;
 	fromDistributor :> width;
-	fromDistributor :> height;
-//	fromDistributor <: !WORKER_RDY;
+	fromDistributor :> height; // number of output rows (sent rows = height + 2)!
 
 	while (width > 0 && height > 0) {
 		fromDistributor :> pos;
 
-		for (i = 0; i < height * width; i++) {
+		for (i = 0; i < (height + 2) * width; i++) {
 			fromDistributor :> block[i];
 		}
 
@@ -231,11 +258,11 @@ void worker(chanend fromDistributor, chanend toCollector)
 int main() {
 //    char infname[] = "src/test0.pgm"; //put your input image path here
 //    char outfname[] = "bin/testout.pgm"; //put your output image path here
-    chan c_inIO, c_outIO, dataOut, fromWorker[WORKERNO], toWorker[WORKERNO]; //extend your channel definitions here
+    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO]; //extend your channel definitions here
 
     par //extend/change this par statement to implement your concurrent filter
     {
-        on stdcore[0]: DataInStream( "src/BristolCathedral.pgm", c_inIO );
+        on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
         on stdcore[0]: distributor( toWorker, c_inIO );
         on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
         on stdcore[0]: collector(fromWorker, c_outIO);
