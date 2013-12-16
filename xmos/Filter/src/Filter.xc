@@ -26,12 +26,12 @@ typedef unsigned char uchar;
 #define BLACK 0
 
 #define WORKERNO 4
-#define SLICEH 5
-#define NSLICE (int)(IMHT/SLICEH)
+#define SLICEH 3
+#define NSLICE (IMHT/SLICEH)
 //#define BLOCKSIZE (IMWD) * ((IMHT / WORKERNO) + 2) //130*130 //ENLARGE FOR GREATER THAN 256 * 256, CURRENTLY (256*256)/4
-#define BLOCKSIZE IMWD * SLICEH
+#define BLOCKSIZE (IMWD * SLICEH)
 
-#define WORKER_RDY -1
+#define WORKER_RDY 1
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -75,96 +75,35 @@ void DataInStream(char infname[], chanend c_out)
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
+int getWaiting(chanend workers[]) {
+    int waiting, i, temp;
+    i = -1;
+//    while (waiting < 0 && waiting >= WORKERNO) {
+
+      select {
+            workers[i] :> temp:
+                if (temp == WORKER_RDY) {
+                    waiting = i;
+                } else {
+                    printf("ISSUES\n");
+                }
+                break;
+            default:
+                break;
+        }
+        ++i;
+//    }
+}
+
 // INSERTING TWO EXTRA PIXELS TO ACCOUNT FOR OVERLAP
 void distributor(chanend toWorker[], chanend c_in) {
     uchar val;
-    int i, pc, wc, pwc, slicesDone, currWorker;
-    int first = 1;
-    int sCount = 1; // The last slice we sent a size to.
-
-    int workerLen[WORKERNO];
-
-    printf( "ProcessImage:Start, size = %dx%d\n", IMHT, IMWD );
-
-    for (slicesDone = 0; slicesDone <= NSLICE; slicesDone++) {
-		for (pwc = 0; pwc < workerLen[slicesDone]; pwc++) {
-			c_in :> val;
-			toWorker[slicesDone] <: val;
-		}
-		currWorker = (currWorker + 1) % WORKERNO;
-	}
-
-    /*    	for (i = 0; i < WORKERNO; i++) {
-    		toWorker[i] <: (int) IMWD;
-    		if (first && sCount == NSLICE) {
-    			toWorker[i] <: SLICEH - 2;
-    			toWorker[i] <: (char) (N | E | S | W);
-    			i = WORKERNO;
-    			workerLen[i] = (SLICEH - 2) * IMWD;
-    		} else if (first) {
-    			toWorker[i] <: SLICEH - 1;
-        		toWorker[i] <: (char) (N | E | W);
-    			first = 0;
-    			workerLen[i] = (SLICEH - 1) * IMWD;
-    		} else if (sCount == NSLICE) {
-    			toWorker[i] <: SLICEH - 1;
-    			toWorker[i] <: (char) (S | E | W);
-    			i = WORKERNO;
-    			workerLen[i] = (SLICEH - 1) * IMWD;
-    		} else {
-    			toWorker[i] <: SLICEH;
-    			toWorker[i] <: (char) (E | W);
-    			workerLen[i] = SLICEH * IMWD;
-    		}
-    		sCount++;
-    	}
-
-    	for (slicesDone = 0; slicesDone <= NSLICE; slicesDone++) {
-    		for (pwc = 0; pwc < workerLen[slicesDone]; pwc++) {
-    			c_in :> val;
-    			toWorker[slicesDone] <: val;
-    		}
-    		currWorker = (currWorker + 1) % WORKERNO;
-    	}
-*/
+    int cWorker, x, y, workRemaining;
+    uchar sentLine[IMWD];
 
 
 
-    /*
 
-    toWorker[i] <: (int)IMWD;
-    toWorker[i] <: SLICEH + 1;
-    toWorker[i] <: (char)(N | E | W);
-    for (i++; i < WORKERNO - 1; i++) {
-    	toWorker[i] <: (int)IMWD;
-    	toWorker[i] <: (int)SLICEH + 2;
-    	toWorker[i] <: (char)(E | W);
-    }
-    toWorker[i] <: (int)IMWD;
-    toWorker[i] <: SLICEH + 1;
-    toWorker[i] <: (char)(S | E | W);
-
-    i = 0;
-    for( int y = 0; y < IMHT; y++ )
-    {
-        for( int x = 0; x < IMWD; x++ )
-        {
-        	c_in :> val;
-        	toWorker[i % WORKERNO] <: val;
-        	if ((y % SLICEH) == (SLICEH - 1) && y != (IMHT - 1)) {
-        		// If at bottom of slice, need to send to next slice.
-        		toWorker[(i + 1) % WORKERNO] <: val;
-        	} else if ((y % SLICEH) == 0 && y != 0) {
-        		// If at top of slice, send the current row to the previous slice too.
-        		toWorker[(i - 1) % WORKERNO] <: val;
-        	}
-        }
-        if ((y % SLICEH) == (SLICEH - 1)) {
-        	// If after looping through X on the bottom of a slice, we should target the next slice.
-        	i++;
-        }
-    }
-    */
     printf( "ProcessImage:Done...\n" );
 }
 
@@ -209,7 +148,7 @@ void collector(chanend fromWorker[], chanend dataOut){
 
 	sliceLim = IMWD * (IMHT / WORKERNO);
 
-	// TODO: Buffer from other workers.
+	// Buffer from other workers.
 	for (i = 0; i < WORKERNO; i++) {
 		for (pc = 0; pc < sliceLim; pc++) {
 			fromWorker[i] :> tmp;
@@ -239,6 +178,7 @@ void worker(chanend fromDistributor, chanend toCollector)
 	fromDistributor <: WORKER_RDY;
 	fromDistributor :> width;
 	fromDistributor :> height;
+//	fromDistributor <: !WORKER_RDY;
 
 	while (width > 0 && height > 0) {
 		fromDistributor :> pos;
