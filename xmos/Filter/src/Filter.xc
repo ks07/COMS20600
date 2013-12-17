@@ -204,7 +204,7 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 		}
 
 		x = (pos & E) ? width : width - 1;
-		y = (pos & S) ? height - 1 : height - 2;
+		y = (pos & S) ? height : height;
 
 		if (pos & E && pos & W) {
 			jump = 1;
@@ -214,9 +214,9 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 			jump = 3;
 		}
 
-		printf("[%d] Telling collector our slice: %d.\n", sliceNo);
+		printf("[%d] Telling collector our slice: %d.\n", id, sliceNo);
 		toCollector <: sliceNo;
-DBGSENT = 0;
+		DBGSENT = 0;
 		for (; i < ind(x, y, width); ((i % width) == x - 1) ? i += jump : i++) {
 			if (onedge(i, width, height)) {
 				temp = 0;
@@ -234,8 +234,10 @@ DBGSENT = 0;
 		fromDistributor :> width;
 		fromDistributor :> height;
 	}
+	printf("[%d] informing collector we are done.\n", id);
+	toCollector <: -1;
 
-	printf("Worker %d done\n", id);
+	printf("[%d] Worker done\n", id);
 }
 
 
@@ -281,19 +283,20 @@ void collector(chanend fromWorker[], chanend dataOut){
 	cWorker = -1;
 	// Buffer from other workers.
 	for (i = 0; i < WORKERNO; i++) {
-		idBuff[i] = -1;
+		idBuff[i] = -2;
 	}
 
 	for (i = 0; i <= NSLICE; i++) {
 		for (j = 0; cWorker < 0 || cWorker >= WORKERNO; j = (j + 1) % WORKERNO) {
 			// Attempt a read from every worker until we find the next slice ID, i.e. i. Must buffer read values to avoid reading data prematurely.
-			if (idBuff[j] < 0) {
+			// If idBuff[j] == -1, that worker is dead. If < -1, read.
+			if (idBuff[j] < -1) {
 				fromWorker[j] :> idBuff[j];
 				printf("Collector: [%d] told us it has %d\n", j, idBuff[j]);
 			}
 			if (idBuff[j] == i) {
 				cWorker = j;
-				idBuff[j] = -1;
+				idBuff[j] = -2;
 			}
 		}
 		printf("Collector: Reading slice %d from [%d]\n", i, cWorker);
