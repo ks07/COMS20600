@@ -108,7 +108,11 @@ void distributor(chanend toWorker[], chanend c_in) {
         toWorker[cWorker] <: NSLICE - workRemaining;
         toWorker[cWorker] <: IMWD;
         toWorker[cWorker] <: SLICEH;
-        toWorker[cWorker] <: (char) (E | W);
+        if (workRemaining == NSLICE) {
+        	toWorker[cWorker] <: (char) (N | E | W);
+        } else {
+        	toWorker[cWorker] <: (char) (E | W);
+        }
         for (x = 0; x < IMWD; x++) {
             toWorker[cWorker] <: buffa[x]; // Row already output, calc only.
         }
@@ -175,7 +179,7 @@ unsigned int onedge(unsigned int i, unsigned int w, unsigned int h) {
 void worker(int id, chanend fromDistributor, chanend toCollector) {
 	char pos;
 	int height, width, sliceNo, DBGSENT;
-	unsigned int x, y, i, jump;
+	unsigned int xLim, yLim, i, jump;
 	char temp;
 	char block[BLOCKSIZE];
 
@@ -203,8 +207,8 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 			i = ind(1, 1, width);
 		}
 
-		x = (pos & E) ? width : width - 1;
-		y = (pos & S) ? height : height;
+		xLim = (pos & E) ? width : width - 1;
+		yLim = (pos & S) ? height : height;
 
 		if (pos & E && pos & W) {
 			jump = 1;
@@ -214,10 +218,12 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 			jump = 3;
 		}
 
-		printf("[%d] Telling collector our slice: %d.\n", id, sliceNo);
+		printf("[%d] Telling collector our slice: %d and size %d.\n", id, sliceNo, height * IMWD);
 		toCollector <: sliceNo;
+		toCollector <: height * IMWD;
+
 		DBGSENT = 0;
-		for (; i < ind(x, y, width); ((i % width) == x - 1) ? i += jump : i++) {
+		for (; i < ind(xLim, yLim, width); ((i % width) == xLim - 1) ? i += jump : i++) {
 			if (onedge(i, width, height)) {
 				temp = 0;
 			} else {
@@ -279,7 +285,7 @@ void DataOutStream(char outfname[], chanend c_in)
 // TODO: Reduce blocking on collector.
 void collector(chanend fromWorker[], chanend dataOut){
 	uchar tmp;
-	int i, j, cWorker, pc, idBuff[WORKERNO];
+	int i, j, cWorker, pc, idBuff[WORKERNO], sliceLen;
 	cWorker = -1;
 	// Buffer from other workers.
 	for (i = 0; i < WORKERNO; i++) {
@@ -299,8 +305,11 @@ void collector(chanend fromWorker[], chanend dataOut){
 				idBuff[j] = -2;
 			}
 		}
-		printf("Collector: Reading slice %d from [%d]\n", i, cWorker);
-		for (pc = 0; pc < IMWD*SLICEH; pc++) {
+
+		fromWorker[cWorker] :> sliceLen;
+
+		printf("Collector: Reading slice %d of size %d from [%d]\n", i, sliceLen, cWorker);
+		for (pc = 0; pc < sliceLen; pc++) {
 			fromWorker[cWorker] :> tmp;
 			dataOut <: tmp;
 		}
