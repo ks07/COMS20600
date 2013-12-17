@@ -13,6 +13,12 @@ typedef unsigned char uchar;
 #include "pgmIO.h"
 
 in port buttons = PORT_BUTTON;
+out port cled0 = PORT_CLOCKLED_0;
+out port cled1 = PORT_CLOCKLED_1;
+out port cled2 = PORT_CLOCKLED_2;
+out port cled3 = PORT_CLOCKLED_3;
+out port cledG = PORT_CLOCKLED_SELG;
+out port cledR = PORT_CLOCKLED_SELR;
 
 #define IMHT 256
 #define IMWD 400
@@ -40,6 +46,82 @@ in port buttons = PORT_BUTTON;
 #define BTN_PAUSERES 1
 
 #define WORKER_RDY 1
+
+#define LED_STOP 15
+
+#define LED_STEP_SLICES (NSLICE + 1) / 12
+
+//DISPLAYS an LED pattern in one quadrant of the clock LEDs
+void showLED(out port p, chanend fromVisualiser) {
+	unsigned int lightUpPattern;
+	int running = 1;
+	while (running) {
+		fromVisualiser :> lightUpPattern; //read LED pattern from visualiser process
+		if (lightUpPattern == LED_STOP) {
+			running = 0;
+		} else {
+			p <: lightUpPattern; //send pattern to LEDs
+		}
+	}
+
+	printf("LED quad finished\n");
+}
+
+// Displays an arbitrary pattern on LEDs. Takes an array of active LED numbers.
+void showPattern(int setOn[], int len, chanend quad0, chanend quad1, chanend quad2, chanend quad3) {
+	int pat0, pat1, pat2, pat3, t0;
+	pat0 = pat1 = pat2 = pat3 = 0;
+
+	for (int i = 0; i < len; i++) {
+		t0 = 16 << (setOn[i] % 3);
+		pat0 = (t0 * ((setOn[i] / 3) == 0)) | pat0;
+		pat1 = (t0 * ((setOn[i] / 3) == 1)) | pat1;
+		pat2 = (t0 * ((setOn[i] / 3) == 2)) | pat2;
+		pat3 = (t0 * ((setOn[i] / 3) == 3)) | pat3;
+	}
+
+	quad0 <: pat0;
+	quad1 <: pat1;
+	quad2 <: pat2;
+	quad3 <: pat3;
+}
+
+//PROCESS TO COORDINATE DISPLAY of LED Ants
+void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1, chanend toQuadrant2, chanend toQuadrant3) {
+	int progress = 0;
+	int lCnt, sCnt;
+	int lights[] = {0,1,2,3,4,5,6,7,8,9,10,11};
+	cledG <: 1;
+	lCnt = 0;
+	sCnt = 0;
+
+	while (progress != -1) {
+		fromCollector :> progress; // Read a number of newly added slices.
+		sCnt += progress;
+
+		if (sCnt >= LED_STEP_SLICES) {
+			lCnt++;
+			sCnt = 0;
+		}
+		if (lCnt > 12) {
+			lCnt = 12; // Sanitise led count.
+		}
+		// Convert progress to an LED number.
+		showPattern(lights, lCnt, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+	}
+
+	cledG <: 0;
+	cledR <: 1;
+	showPattern(lights, 12, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+
+	// Shut off LED processes
+	toQuadrant0 <: LED_STOP;
+	toQuadrant1 <: LED_STOP;
+	toQuadrant2 <: LED_STOP;
+	toQuadrant3 <: LED_STOP;
+
+	printf("Visualiser: finished\n");
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -285,9 +367,8 @@ void DataOutStream(char outfname[], chanend c_in)
     return;
 }
 
-// TODO: Give workers slice counter, read count first here, find the next one, read data, loop until all slices in.
 // TODO: Reduce blocking on collector.
-void collector(chanend fromWorker[], chanend dataOut){
+void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	uchar tmp;
 	int i, j, cWorker, pc, idBuff[WORKERNO], sliceLen;
 	cWorker = -1;
@@ -297,6 +378,7 @@ void collector(chanend fromWorker[], chanend dataOut){
 	}
 
 	for (i = 0; i <= NSLICE; i++) {
+
 		for (j = 0; cWorker < 0 || cWorker >= WORKERNO; j = (j + 1) % WORKERNO) {
 			// Attempt a read from every worker until we find the next slice ID, i.e. i. Must buffer read values to avoid reading data prematurely.
 			// If idBuff[j] == -1, that worker is dead. If < -1, read.
@@ -318,8 +400,19 @@ void collector(chanend fromWorker[], chanend dataOut){
 			dataOut <: tmp;
 		}
 		printf("Collector: Read done\n");
+		toVis <: 1; // Tell vis that we have added another slice to output.
 		cWorker = -1;
 	}
+
+	// Wait until all workers are dead before sepuku
+	for (i = 0; i < WORKERNO; i++) {
+		while (idBuff[i] != -1) {
+			fromWorker[i] :> idBuff[i];
+		}
+	}
+
+	// Tell vis we are thankful for it's assistance and wish it a merry christmas
+	toVis <: -1;
 
 	printf("Collector quitting.\n");
 }
@@ -373,18 +466,21 @@ void buttonListener(in port buttons, chanend toDistributor) {
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
 int main() {
-//    char infname[] = "src/test0.pgm"; //put your input image path here
-//    char outfname[] = "bin/testout.pgm"; //put your output image path here
-    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], bListener; //extend your channel definitions here
+    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], toVis, quad0, quad1, quad2, quad3, bListener;
 
-    par //extend/change this par statement to implement your concurrent filter
+    par
     {
         //on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
     	on stdcore[0]: DataInStream( "src/BristolCathedral.pgm", c_inIO );
-        on stdcore[0]: distributor( toWorker, c_inIO, bListener );
-        on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
-        on stdcore[0]: collector(fromWorker, c_outIO);
         on stdcore[0]: buttonListener(buttons, bListener);
+        on stdcore[1]: distributor( toWorker, c_inIO, bListener );
+        on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
+        on stdcore[2]: collector(fromWorker, c_outIO, toVis);
+		on stdcore[0]: visualiser(toVis,quad0,quad1,quad2,quad3);
+		on stdcore[0]: showLED(cled0,quad0);
+		on stdcore[1]: showLED(cled1,quad1);
+		on stdcore[2]: showLED(cled2,quad2);
+		on stdcore[3]: showLED(cled3,quad3);
         par (int i=0;i<WORKERNO;i++) {
         	on stdcore[i%4] : worker(i, toWorker[i], fromWorker[i]);
         }
