@@ -390,7 +390,7 @@ void DataOutStream(char outfname[], chanend c_in)
 // TODO: Reduce blocking on collector.
 void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	uchar tmp;
-	int i, j, cWorker, pc, idBuff[WORKERNO], sliceLen, closedMask;
+	int i, j, cWorker, pc, idBuff[WORKERNO], sliceLen;
 	cWorker = -1;
 	// Buffer from other workers.
 	for (i = 0; i < WORKERNO; i++) {
@@ -398,8 +398,8 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	}
 
 	for (i = 0; i <= NSLICE; i++) {
-		closedMask = 0; // Bitmask of dead workers
-		for (j = 0; cWorker < 0 || cWorker >= WORKERNO || closedMask < (1 << WORKERNO) - 1; j = (j + 1) % WORKERNO) {
+
+		for (j = 0; cWorker < 0 || cWorker >= WORKERNO; j = (j + 1) % WORKERNO) {
 			// Attempt a read from every worker until we find the next slice ID, i.e. i. Must buffer read values to avoid reading data prematurely.
 			// If idBuff[j] == -1, that worker is dead. If < -1, read.
 			if (idBuff[j] < -1) {
@@ -409,26 +409,19 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 			if (idBuff[j] == i) {
 				cWorker = j;
 				idBuff[j] = -2;
-			} else if (idBuff[j] == -1) {
-				closedMask = closedMask | (1 << j);
 			}
 		}
 
-		if (closedMask >= (1 << WORKERNO) - 1) {
-			// All workers have indicated that they are dead. We should quit as no more work will be provided.
-			i = NSLICE + 1;
-		} else {
-			fromWorker[cWorker] :> sliceLen;
+		fromWorker[cWorker] :> sliceLen;
 
-			printf("Collector: Reading slice %d of size %d from [%d]\n", i, sliceLen, cWorker);
-			for (pc = 0; pc < sliceLen; pc++) {
-				fromWorker[cWorker] :> tmp;
-				dataOut <: tmp;
-			}
-			printf("Collector: Read done\n");
-			toVis <: 1; // Tell vis that we have added another slice to output.
-			cWorker = -1;
+		printf("Collector: Reading slice %d of size %d from [%d]\n", i, sliceLen, cWorker);
+		for (pc = 0; pc < sliceLen; pc++) {
+			fromWorker[cWorker] :> tmp;
+			dataOut <: tmp;
 		}
+		printf("Collector: Read done\n");
+		toVis <: 1; // Tell vis that we have added another slice to output.
+		cWorker = -1;
 	}
 
 	// Wait until all workers are dead before sepuku
