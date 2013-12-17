@@ -42,6 +42,8 @@ out port cledR = PORT_CLOCKLED_SELR;
 
 #define LED_STOP 15
 
+#define LED_STEP_SLICES (NSLICE + 1) / 12
+
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
 void showLED(out port p, chanend fromVisualiser) {
 	unsigned int lightUpPattern;
@@ -79,17 +81,31 @@ void showPattern(int setOn[], int len, chanend quad0, chanend quad1, chanend qua
 
 //PROCESS TO COORDINATE DISPLAY of LED Ants
 void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1, chanend toQuadrant2, chanend toQuadrant3) {
-	int progress = 0; // Progress out of 100. (%)
-	int rcv, i;
+	int progress = 0;
+	int lCnt, sCnt;
 	int lights[] = {0,1,2,3,4,5,6,7,8,9,10,11};
 	cledG <: 1;
+	lCnt = 0;
+	sCnt = 0;
 
-	while (progress < 100) {
-		fromCollector :> progress;
+	while (progress != -1) {
+		fromCollector :> progress; // Read a number of newly added slices.
+		sCnt += progress;
 
+		if (sCnt >= LED_STEP_SLICES) {
+			lCnt++;
+			sCnt = 0;
+		}
+		if (lCnt > 12) {
+			lCnt = 12; // Sanitise led count.
+		}
 		// Convert progress to an LED number.
-		showPattern(lights, 12 * progress / 100, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+		showPattern(lights, lCnt, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 	}
+
+	cledG <: 0;
+	cledR <: 1;
+	showPattern(lights, 12, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 
 	// Shut off LED processes
 	toQuadrant0 <: LED_STOP;
@@ -342,7 +358,7 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	}
 
 	for (i = 0; i <= NSLICE; i++) {
-		toVis <: i * 100 / NSLICE;
+
 		for (j = 0; cWorker < 0 || cWorker >= WORKERNO; j = (j + 1) % WORKERNO) {
 			// Attempt a read from every worker until we find the next slice ID, i.e. i. Must buffer read values to avoid reading data prematurely.
 			// If idBuff[j] == -1, that worker is dead. If < -1, read.
@@ -364,6 +380,7 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 			dataOut <: tmp;
 		}
 		printf("Collector: Read done\n");
+		toVis <: 1; // Tell vis that we have added another slice to output.
 		cWorker = -1;
 	}
 
@@ -374,23 +391,23 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 		}
 	}
 
+	// Tell vis we are thankful for it's assistance and wish it a merry christmas
+	toVis <: -1;
 
 	printf("Collector quitting.\n");
 }
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
 int main() {
-//    char infname[] = "src/test0.pgm"; //put your input image path here
-//    char outfname[] = "bin/testout.pgm"; //put your output image path here
     chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], toVis, quad0, quad1, quad2, quad3; //extend your channel definitions here
 
-    par //extend/change this par statement to implement your concurrent filter
+    par
     {
         //on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
     	on stdcore[0]: DataInStream( "src/BristolCathedral.pgm", c_inIO );
-        on stdcore[0]: distributor( toWorker, c_inIO );
+        on stdcore[1]: distributor( toWorker, c_inIO );
         on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
-        on stdcore[0]: collector(fromWorker, c_outIO, toVis);
+        on stdcore[2]: collector(fromWorker, c_outIO, toVis);
 		on stdcore[0]: visualiser(toVis,quad0,quad1,quad2,quad3);
 		on stdcore[0]: showLED(cled0,quad0);
 		on stdcore[1]: showLED(cled1,quad1);
