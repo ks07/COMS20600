@@ -300,6 +300,14 @@ void collector(chanend fromWorker[], chanend dataOut){
 		cWorker = -1;
 	}
 
+	// Wait until all workers are dead before sepuku
+	for (i = 0; i < WORKERNO; i++) {
+		while (idBuff[i] != -1) {
+			fromWorker[i] :> idBuff[i];
+		}
+	}
+
+
 	printf("Collector quitting.\n");
 }
 
