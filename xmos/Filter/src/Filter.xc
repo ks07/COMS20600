@@ -148,9 +148,7 @@ void DataInStream(char infname[], chanend c_out)
         for( int x = 0; x < IMWD; x++ )
         {
             c_out <: line[ x ];
-            //printf( "-%4.1d ", line[ x ] ); //uncomment to show image values
         }
-        //printf( "\n" ); //uncomment to show image values
     }
 
     _closeinpgm();
@@ -180,14 +178,13 @@ int getWaiting(chanend workers[], int last) {
     return waiting;
 }
 
-// INSERTING TWO EXTRA PIXELS TO ACCOUNT FOR OVERLAP
 void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
-    int cWorker, x, y, workRemaining, rdy, temp;
+    int cWorker, x, y, workRemaining, temp, shutdown, i;
     uchar buffa[IMWD], buffb[IMWD], tmp;
     //Blocking till button A is pressed
-    buttonListener :> cWorker;
+    buttonListener :> temp;
     cWorker = 0;
-
+    shutdown = 0;
 
     // Initialise buffb from input. buffa can stay uninitialised as it will be ignored.
     for (x = 0; x < IMWD; x++) {
@@ -198,42 +195,66 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
         cWorker = getWaiting(toWorker, cWorker);
         printf("Sending slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
         // height gives number of rows the worker must OUTPUT (i.e. input + 2)
+
         toWorker[cWorker] <: NSLICE - workRemaining;
-        toWorker[cWorker] <: IMWD;
-        toWorker[cWorker] <: SLICEH;
-        if (workRemaining == NSLICE) {
-        	toWorker[cWorker] <: (char) (N | E | W);
-        } else {
-        	toWorker[cWorker] <: (char) (E | W);
-        }
-        for (x = 0; x < IMWD; x++) {
-            toWorker[cWorker] <: buffa[x]; // Row already output, calc only.
-        }
-        for (x = 0; x < IMWD; x++) {
-            toWorker[cWorker] <: buffb[x]; // First row to output.
-        }
-        for (y = 0; y < SLICEH; y++) { // Send the rest of the output rows, as well as buffer row.
-            for (x = 0; x < IMWD; x++) {
-                c_in :> tmp;
-                toWorker[cWorker] <: tmp;
-                if (y == SLICEH - 2) {
-                	// 2nd last line, i.e. final output line.
-                	buffa[x] = tmp;
-                } else if (y == SLICEH - 1) {
-                	// Last line, the next worker will output this.
-                	buffb[x] = tmp;
-                }
-            }
-        }
+
+        // Check if buttonListener is asking us to cancel or pause.
         select {
             case buttonListener :> temp:
-                printf("Button Paused\n");
-                 while (temp != BTND) {
-                     buttonListener :> temp;
-                 }
+            	if (temp == BTN_STOP) {
+            		printf("Button Stop\n");
+            		shutdown = 1;
+            	} else if (temp == BTN_PAUSERES) {
+					printf("Button Paused\n");
+					while (temp != BTN_PAUSERES) {
+						buttonListener :> temp;
+					}
+				}
                 break;
             default:
                 break;
+        }
+
+        if (shutdown) {
+        	// Give a 0 size slice to all workers.
+        	for (i = 0; i < WORKERNO; i++) {
+        		if (i != cWorker) {
+        			// The cWorker has already been partially initialised, so skip these steps in that case.
+        			toWorker[i] :> temp;
+        			toWorker[i] <: -1;
+        		}
+        		toWorker[i] <: 0;
+        		toWorker[i] <: 0;
+        	}
+
+        	workRemaining = 0; // Set workRemaining so we don't try to continue.
+        } else {
+			toWorker[cWorker] <: IMWD;
+			toWorker[cWorker] <: SLICEH;
+			if (workRemaining == NSLICE) {
+				toWorker[cWorker] <: (char) (N | E | W);
+			} else {
+				toWorker[cWorker] <: (char) (E | W);
+			}
+			for (x = 0; x < IMWD; x++) {
+				toWorker[cWorker] <: buffa[x]; // Row already output, calc only.
+			}
+			for (x = 0; x < IMWD; x++) {
+				toWorker[cWorker] <: buffb[x]; // First row to output.
+			}
+			for (y = 0; y < SLICEH; y++) { // Send the rest of the output rows, as well as buffer row.
+				for (x = 0; x < IMWD; x++) {
+					c_in :> tmp;
+					toWorker[cWorker] <: tmp;
+					if (y == SLICEH - 2) {
+						// 2nd last line, i.e. final output line.
+						buffa[x] = tmp;
+					} else if (y == SLICEH - 1) {
+						// Last line, the next worker will output this.
+						buffb[x] = tmp;
+					}
+				}
+			}
         }
     }
     cWorker = getWaiting(toWorker, cWorker);
@@ -261,7 +282,7 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
 
     // Need to inform workers that all work is complete.
     for (cWorker = 0; cWorker < WORKERNO; cWorker++) {
-    	toWorker[cWorker] :> rdy;
+    	toWorker[cWorker] :> temp;
 		// Worker is done and asking for more. Tell it to shut off.
         toWorker[cWorker] <: 0;
 		toWorker[cWorker] <: 0;
@@ -298,7 +319,6 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 		for (i = 0; i < (height + 2) * width; i++) {
 			fromDistributor :> block[i];
 		}
-
 
 		printf("[%d] Telling collector our slice: %d and size %d.\n", id, sliceNo, height * IMWD);
 		toCollector <: sliceNo;
@@ -422,15 +442,13 @@ void buttonListener(in port buttons, chanend toDistributor) {
     int buttonInput; //button pattern currently pressed
     unsigned int running = 1; //helper variable to determine system shutdown
     int paused = 1;
-    // User is choosing starting positions of particles
-//    buttons when pinsneq(15) :> buttonInput;
-//    buttons when pinseq(15) :> void;
+
     while (running) {
         buttons when pinsneq(15) :> buttonInput;
         buttons when pinseq(15) :> void;
         switch (buttonInput) {
         case BTNA:
-            // A = Start
+            // A = Start/resume
             if (paused) {
                 paused = 0;
                 toDistributor <: BTN_PAUSERES;
@@ -445,6 +463,7 @@ void buttonListener(in port buttons, chanend toDistributor) {
             break;
         case BTNC:
             // C = Quit
+        	printf("Quit btn pressed.\n");
             if (paused) {
                 toDistributor <: BTN_PAUSERES;
             }
@@ -454,10 +473,6 @@ void buttonListener(in port buttons, chanend toDistributor) {
             break;
         case BTND:
             // D = Noop
-            if (paused) {
-                toDistributor <: BTND;
-                paused = 0;
-            }
             break;
         }
     }
