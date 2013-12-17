@@ -6,12 +6,13 @@
 // TITLE: "Concurrent Image Filter"
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-
 typedef unsigned char uchar;
 
 #include <platform.h>
 #include <stdio.h>
 #include "pgmIO.h"
+
+in port buttons = PORT_BUTTON;
 
 #define IMHT 256
 #define IMWD 400
@@ -28,8 +29,15 @@ typedef unsigned char uchar;
 #define WORKERNO 4
 #define SLICEH 3
 #define NSLICE (IMHT/SLICEH) // The number of full slices.
-//#define BLOCKSIZE (IMWD) * ((IMHT / WORKERNO) + 2) //130*130 //ENLARGE FOR GREATER THAN 256 * 256, CURRENTLY (256*256)/4
 #define BLOCKSIZE (IMWD * (SLICEH+2))
+
+// Button Input IO
+#define BTNA 14
+#define BTNB 13
+#define BTNC 11
+#define BTND 7
+#define BTN_STOP 0
+#define BTN_PAUSERES 1
 
 #define WORKER_RDY 1
 
@@ -91,10 +99,13 @@ int getWaiting(chanend workers[], int last) {
 }
 
 // INSERTING TWO EXTRA PIXELS TO ACCOUNT FOR OVERLAP
-void distributor(chanend toWorker[], chanend c_in) {
-    int cWorker, x, y, workRemaining, rdy;
+void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
+    int cWorker, x, y, workRemaining, rdy, temp;
     uchar buffa[IMWD], buffb[IMWD], tmp;
+    //Blocking till button A is pressed
+    buttonListener :> cWorker;
     cWorker = 0;
+
 
     // Initialise buffb from input. buffa can stay uninitialised as it will be ignored.
     for (x = 0; x < IMWD; x++) {
@@ -131,6 +142,16 @@ void distributor(chanend toWorker[], chanend c_in) {
                 	buffb[x] = tmp;
                 }
             }
+        }
+        select {
+            case buttonListener :> temp:
+                printf("Button Paused\n");
+                 while (temp != BTND) {
+                     buttonListener :> temp;
+                 }
+                break;
+            default:
+                break;
         }
     }
     cWorker = getWaiting(toWorker, cWorker);
@@ -179,7 +200,7 @@ unsigned int onedge(unsigned int i, unsigned int w, unsigned int h) {
 void worker(int id, chanend fromDistributor, chanend toCollector) {
 	char pos;
 	int height, width, sliceNo, DBGSENT;
-	unsigned int xLim, yLim, x, y, i, jump;
+	unsigned int x, y, i;
 	char temp;
 	char block[BLOCKSIZE];
 
@@ -303,19 +324,67 @@ void collector(chanend fromWorker[], chanend dataOut){
 	printf("Collector quitting.\n");
 }
 
+//READ BUTTONS and send commands to Visualiser
+void buttonListener(in port buttons, chanend toDistributor) {
+    int buttonInput; //button pattern currently pressed
+    unsigned int running = 1; //helper variable to determine system shutdown
+    int paused = 1;
+    // User is choosing starting positions of particles
+//    buttons when pinsneq(15) :> buttonInput;
+//    buttons when pinseq(15) :> void;
+    while (running) {
+        buttons when pinsneq(15) :> buttonInput;
+        buttons when pinseq(15) :> void;
+        switch (buttonInput) {
+        case BTNA:
+            // A = Start
+            if (paused) {
+                paused = 0;
+                toDistributor <: BTN_PAUSERES;
+            }
+            break;
+        case BTNB:
+            // B = Pause
+            if (!paused) {
+                toDistributor <: BTN_PAUSERES;
+                paused = 1;
+            }
+            break;
+        case BTNC:
+            // C = Quit
+            if (paused) {
+                toDistributor <: BTN_PAUSERES;
+            }
+            toDistributor <: BTN_STOP;
+            running = 0;
+            paused = 0;
+            break;
+        case BTND:
+            // D = Noop
+            if (paused) {
+                toDistributor <: BTND;
+                paused = 0;
+            }
+            break;
+        }
+    }
+}
+
+
 //MAIN PROCESS defining channels, orchestrating and starting the threads
 int main() {
 //    char infname[] = "src/test0.pgm"; //put your input image path here
 //    char outfname[] = "bin/testout.pgm"; //put your output image path here
-    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO]; //extend your channel definitions here
+    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], bListener; //extend your channel definitions here
 
     par //extend/change this par statement to implement your concurrent filter
     {
         //on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
     	on stdcore[0]: DataInStream( "src/BristolCathedral.pgm", c_inIO );
-        on stdcore[0]: distributor( toWorker, c_inIO );
+        on stdcore[0]: distributor( toWorker, c_inIO, bListener );
         on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
         on stdcore[0]: collector(fromWorker, c_outIO);
+        on stdcore[0]: buttonListener(buttons, bListener);
         par (int i=0;i<WORKERNO;i++) {
         	on stdcore[i%4] : worker(i, toWorker[i], fromWorker[i]);
         }
