@@ -13,8 +13,8 @@ typedef unsigned char uchar;
 #include <stdio.h>
 #include "pgmIO.h"
 
-#define IMHT 16//256
-#define IMWD 16//400
+#define IMHT 256
+#define IMWD 400
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -179,7 +179,7 @@ unsigned int onedge(unsigned int i, unsigned int w, unsigned int h) {
 void worker(int id, chanend fromDistributor, chanend toCollector) {
 	char pos;
 	int height, width, sliceNo, DBGSENT;
-	unsigned int xLim, yLim, i, jump;
+	unsigned int xLim, yLim, x, y, i, jump;
 	char temp;
 	char block[BLOCKSIZE];
 
@@ -196,41 +196,24 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 			fromDistributor :> block[i];
 		}
 
-		// Do work on inner pixels only
-		if (pos & N && pos & W) {
-			i = 0;
-		} else if (pos & N) {
-			i = ind(1, 0, width);
-		} else if (pos & W) {
-			i = ind(0, 1, width);
-		} else {
-			i = ind(1, 1, width);
-		}
-
-		xLim = (pos & E) ? width : width - 1;
-		yLim = (pos & S) ? height : height;
-
-		if (pos & E && pos & W) {
-			jump = 1;
-		} else if ((pos & E) || (pos & W)) {
-			jump = 2;
-		} else {
-			jump = 3;
-		}
 
 		printf("[%d] Telling collector our slice: %d and size %d.\n", id, sliceNo, height * IMWD);
 		toCollector <: sliceNo;
 		toCollector <: height * IMWD;
-
+		// TODO: width needs a buffer either side
 		DBGSENT = 0;
-		for (; i < ind(xLim, yLim, width); ((i % width) == xLim - 1) ? i += jump : i++) {
-			if (onedge(i, width, height)) {
-				temp = 0;
-			} else {
-				temp = (block[i + 1] + block[i - 1] + block[i + width] + block[i - width] + block[i + width + 1] + block[i + width - 1] + block[i - width + 1] + block[i - width - 1] + block[i]) / 9;
+		// Start one pixel in in either direction.
+		for (y = 1; y <= height; y++) {
+			for (x = 0; x < width; x++) {
+				if ((y == 1 && (pos & N)) || (x == 0) || (y == height && (pos & S)) || (x == width - 1)) {
+					temp = BLACK;
+				} else {
+					//temp = block[ind(x,y,width)];
+					temp = (block[ind(x,y,width)] + block[ind(x+1,y,width)] + block[ind(x-1,y,width)] + block[ind(x,y-1,width)] + block[ind(x,y+1,width)] + block[ind(x-1,y-1,width)] + block[ind(x-1,y+1,width)] + block[ind(x+1,y-1,width)] + block[ind(x+1,y+1,width)]) / 9;
+				}
+				toCollector <: temp;
+				DBGSENT++;
 			}
-			toCollector <: temp;
-			DBGSENT++;
 		}
 
 		printf("[%d] done slice, sent %d to collector.\n", id, DBGSENT);
@@ -328,7 +311,8 @@ int main() {
 
     par //extend/change this par statement to implement your concurrent filter
     {
-        on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
+        //on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
+    	on stdcore[0]: DataInStream( "src/BristolCathedral.pgm", c_inIO );
         on stdcore[0]: distributor( toWorker, c_inIO );
         on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
         on stdcore[0]: collector(fromWorker, c_outIO);
