@@ -59,6 +59,40 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define LED_STEP_SLICES (NSLICE + 1) / 12
 #define DBGPRT
 
+// Timing for the system
+void time(chanend fromDistributor, chanend fromCollector) {
+    timer tmr;
+    unsigned int startTime, endTime, collectTime, checkTime, overallTime;
+    int temp, x;
+    x = 1;
+    fromDistributor :> temp;
+    tmr :> startTime;
+    startTime = startTime;
+    checkTime = startTime;
+    overallTime = 0;
+    while (x) {
+        select {
+            case fromCollector :> temp:
+                 tmr :> endTime;
+                 x = 0;
+                 break;
+//            case tmr :> collectTime:
+//                collectTime = collectTime;
+//                if (collectTime > checkTime) {
+//                    overallTime = overallTime + checkTime + (collectTime - checkTime);
+//                    checkTime = collectTime - checkTime;
+//                } else {
+//                    overallTime = overallTime + checkTime + collectTime;
+//                    checkTime = collectTime;
+//                }
+//                break;
+            default:
+                 break;
+        }
+    }
+    printf("Overall time running was %dms\n", (endTime - startTime)/100000);
+}
+
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
 void showLED(out port p, chanend fromVisualiser) {
 	unsigned int lightUpPattern;
@@ -249,11 +283,12 @@ int getWaiting(chanend workers[], int last) {
     return waiting;
 }
 
-void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
+void distributor(chanend toWorker[], chanend c_in, chanend buttonListener, chanend toTimer) {
     int cWorker, x, y, workRemaining, temp, shutdown, i;
     uchar buffa[IMWD], buffb[IMWD], tmp;
     //Blocking till button A is pressed
     buttonListener :> temp;
+    toTimer <: temp;
     cWorker = 0;
     shutdown = 0;
 
@@ -523,7 +558,7 @@ void DataOutStream(char outfname[], char fileBuff[], chanend c_in, chanend loop)
 }
 
 // TODO: Reduce blocking on collector.
-void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
+void collector(chanend fromWorker[], chanend dataOut, chanend toVis, chanend toTimer){
 	uchar tmp;
 	int i, j, x, cWorker, pc, cTotal, idBuff[WORKERNO], sliceLen, working;
 
@@ -607,6 +642,7 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 
 	// Tell vis we are thankful for it's assistance and wish it a merry christmas
 	toVis <: -1;
+	toTimer <: 1;
 
 #ifdef DBGPRT
 	printf("Collector quitting.\n");
@@ -667,15 +703,16 @@ void buttonListener(in port buttons, chanend toDistributor) {
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
 int main() {
-    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], toVis, quad0, quad1, quad2, quad3, bListener, fLoop;
+    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], toVis, quad0, quad1, quad2, quad3, bListener, fLoop, dTimer, cTimer;
 
     par
     {
     	on stdcore[0]: DataInStream( IMAGE, FILEBUFF, c_inIO, fLoop );
         on stdcore[0]: buttonListener(buttons, bListener);
-        on stdcore[1]: distributor( toWorker, c_inIO, bListener );
         on stdcore[0]: DataOutStream( IMAGE_OUT, FILEBUFF, c_outIO, fLoop );
-        on stdcore[2]: collector(fromWorker, c_outIO, toVis);
+        on stdcore[1]: distributor( toWorker, c_inIO, bListener, dTimer);
+        on stdcore[2]: collector(fromWorker, c_outIO, toVis, cTimer);
+        on stdcore[3]: time(dTimer, cTimer);
 		on stdcore[0]: visualiser(toVis,quad0,quad1,quad2,quad3);
 		on stdcore[0]: showLED(cled0,quad0);
 		on stdcore[1]: showLED(cled1,quad1);
