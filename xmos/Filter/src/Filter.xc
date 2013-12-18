@@ -64,6 +64,7 @@ void showLED(out port p, chanend fromVisualiser) {
 		}
 	}
 
+	p <: 0; // Shut off lights before quit.
 	printf("LED quad finished\n");
 }
 
@@ -148,6 +149,14 @@ void DataInStream(char infname[], chanend c_out)
         for( int x = 0; x < IMWD; x++ )
         {
             c_out <: line[ x ];
+            select {
+            	case c_out :> res:
+            		y = IMHT;
+            		x = IMWD;
+            		break;
+            	default:
+            		break;
+            }
         }
     }
 
@@ -192,12 +201,6 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
     }
 
     for (workRemaining = NSLICE; workRemaining >= 1; workRemaining--) {
-        cWorker = getWaiting(toWorker, cWorker);
-        printf("Sending slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
-        // height gives number of rows the worker must OUTPUT (i.e. input + 2)
-
-        toWorker[cWorker] <: NSLICE - workRemaining;
-
         // Check if buttonListener is asking us to cancel or pause.
         select {
             case buttonListener :> temp:
@@ -215,20 +218,14 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
                 break;
         }
 
-        if (shutdown) {
-        	// Give a 0 size slice to all workers.
-        	for (i = 0; i < WORKERNO; i++) {
-        		if (i != cWorker) {
-        			// The cWorker has already been partially initialised, so skip these steps in that case.
-        			toWorker[i] :> temp;
-        			toWorker[i] <: -1;
-        		}
-        		toWorker[i] <: 0;
-        		toWorker[i] <: 0;
-        	}
-
+		if (shutdown) {
         	workRemaining = 0; // Set workRemaining so we don't try to continue.
         } else {
+			cWorker = getWaiting(toWorker, cWorker);
+			printf("Sending slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
+			// height gives number of rows the worker must OUTPUT (i.e. input + 2)
+
+			toWorker[cWorker] <: NSLICE - workRemaining;
 			toWorker[cWorker] <: IMWD;
 			toWorker[cWorker] <: SLICEH;
 			if (workRemaining == NSLICE) {
@@ -257,27 +254,29 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
 			}
         }
     }
-    cWorker = getWaiting(toWorker, cWorker);
-    printf("Sending final slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
-    toWorker[cWorker] <: NSLICE - workRemaining;
-    toWorker[cWorker] <: IMWD;
-    toWorker[cWorker] <: IMHT % SLICEH;
-    toWorker[cWorker] <: (char) (S | E | W);
-    for (x = 0; x < IMWD; x++) {
-        toWorker[cWorker] <: buffa[x]; // Row already output, calc only.
-    }
-    for (x = 0; x < IMWD; x++) {
-        toWorker[cWorker] <: buffb[x]; // First row to output.
-    }
-    for (y = 1; y < IMHT % SLICEH; y++) {
-        for (x = 0; x < IMWD; x++) {
-            c_in :> tmp;
-            toWorker[cWorker] <: tmp;
-            // Can ignore buff now.
-        }
-    }
-    for (x = 0; x < IMWD; x++) {
-        toWorker[cWorker] <: (char)0; // Need to send placeholder values for final row, ala buffa at first iter.
+    if (!shutdown) {
+		cWorker = getWaiting(toWorker, cWorker);
+		printf("Sending final slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
+		toWorker[cWorker] <: NSLICE - workRemaining;
+		toWorker[cWorker] <: IMWD;
+		toWorker[cWorker] <: IMHT % SLICEH;
+		toWorker[cWorker] <: (char) (S | E | W);
+		for (x = 0; x < IMWD; x++) {
+			toWorker[cWorker] <: buffa[x]; // Row already output, calc only.
+		}
+		for (x = 0; x < IMWD; x++) {
+			toWorker[cWorker] <: buffb[x]; // First row to output.
+		}
+		for (y = 1; y < IMHT % SLICEH; y++) {
+			for (x = 0; x < IMWD; x++) {
+				c_in :> tmp;
+				toWorker[cWorker] <: tmp;
+				// Can ignore buff now.
+			}
+		}
+		for (x = 0; x < IMWD; x++) {
+			toWorker[cWorker] <: (char)0; // Need to send placeholder values for final row, ala buffa at first iter.
+		}
     }
 
     // Need to inform workers that all work is complete.
@@ -288,6 +287,15 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
 		toWorker[cWorker] <: 0;
 		toWorker[cWorker] <: 0;
     }
+
+    // Tell data in that we don't want to hear from it no mo'
+    select {
+    	case c_in :> tmp:
+    		break;
+    	default:
+    		break;
+    }
+    c_in <: 0;
 
     printf( "Distributor:Done...\n" );
 }
@@ -360,7 +368,7 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void DataOutStream(char outfname[], chanend c_in)
 {
-    int res;
+    int res, tmp;
     uchar line[ IMWD ];
 
     printf( "DataOutStream:Start...\n" );
@@ -371,14 +379,20 @@ void DataOutStream(char outfname[], chanend c_in)
         printf( "DataOutStream:Error opening %s\n.", outfname );
         return;
     }
+    res = 1;
     for( int y = 0; y < IMHT; y++ )
     {
         for( int x = 0; x < IMWD; x++ )
         {
-            c_in :> line[ x ];
-            //printf( "+%4.1d ", line[ x ] );
+        	c_in :> tmp;
+        	if (tmp < 0) {
+        		// This line means we should give up, all hope is lost.
+        		x = IMWD;
+        		y = IMHT;
+        	} else {
+        		line[x] = (uchar) tmp;
+        	}
         }
-        //printf( "\n" );
         _writeoutline( line, IMWD );
     }
 
@@ -390,7 +404,7 @@ void DataOutStream(char outfname[], chanend c_in)
 // TODO: Reduce blocking on collector.
 void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	uchar tmp;
-	int i, j, cWorker, pc, idBuff[WORKERNO], sliceLen;
+	int i, j, x, cWorker, pc, cTotal, idBuff[WORKERNO], sliceLen, working;
 	cWorker = -1;
 	// Buffer from other workers.
 	for (i = 0; i < WORKERNO; i++) {
@@ -398,30 +412,51 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	}
 
 	for (i = 0; i <= NSLICE; i++) {
-
-		for (j = 0; cWorker < 0 || cWorker >= WORKERNO; j = (j + 1) % WORKERNO) {
+		working = 1;
+		for (j = 0; (cWorker < 0 || cWorker >= WORKERNO) && working; j = (j + 1) % WORKERNO) {
 			// Attempt a read from every worker until we find the next slice ID, i.e. i. Must buffer read values to avoid reading data prematurely.
 			// If idBuff[j] == -1, that worker is dead. If < -1, read.
 			if (idBuff[j] < -1) {
-				fromWorker[j] :> idBuff[j];
-				printf("Collector: [%d] told us it has %d\n", j, idBuff[j]);
+				select {
+					case fromWorker[j] :> idBuff[j]:
+						printf("Collector: [%d] told us it has %d\n", j, idBuff[j]);
+						break;
+					default:
+						break;
+				}
 			}
 			if (idBuff[j] == i) {
 				cWorker = j;
 				idBuff[j] = -2;
 			}
+			cTotal = 0;
+			for (x = 0; x < WORKERNO; x++) {
+				if (idBuff[x] == -1) {
+					cTotal--;
+				}
+			}
+			if (cTotal == -4) {
+				working = 0;
+			}
 		}
 
-		fromWorker[cWorker] :> sliceLen;
-
-		printf("Collector: Reading slice %d of size %d from [%d]\n", i, sliceLen, cWorker);
-		for (pc = 0; pc < sliceLen; pc++) {
-			fromWorker[cWorker] :> tmp;
-			dataOut <: tmp;
+		if (!working) {
+			//All workers are dead
+			printf("Collector: All workers gone, quitting...\n");
+			i = NSLICE + 1;
+			// Tell data out that it's time in this world is up. Such a depressing state of affairs.
+			dataOut <: -1;
+		} else {
+			fromWorker[cWorker] :> sliceLen;
+			printf("Collector: Reading slice %d of size %d from [%d]\n", i, sliceLen, cWorker);
+			for (pc = 0; pc < sliceLen; pc++) {
+				fromWorker[cWorker] :> tmp;
+				dataOut <: (int)tmp;
+			}
+			printf("Collector: Read done\n");
+			toVis <: 1; // Tell vis that we have added another slice to output.
+			cWorker = -1;
 		}
-		printf("Collector: Read done\n");
-		toVis <: 1; // Tell vis that we have added another slice to output.
-		cWorker = -1;
 	}
 
 	// Wait until all workers are dead before sepuku
