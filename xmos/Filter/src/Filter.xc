@@ -96,14 +96,19 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 	int progress = 0;
 	int lCnt, sCnt;
 	int lights[] = {0,1,2,3,4,5,6,7,8,9,10,11};
-	cledG <: 1;
 	lCnt = 0;
 	sCnt = 0;
+
+	cledG <: 0;
+	cledR <: 1;
+
+	showPattern(lights, 12, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 
 	while (progress != -1) {
 		fromCollector :> progress; // Read a number of newly added slices.
 		sCnt += progress;
 
+		// Convert progress to an LED number.
 		if (sCnt >= LED_STEP_SLICES) {
 			lCnt++;
 			sCnt = 0;
@@ -111,13 +116,17 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 		if (lCnt > 12) {
 			lCnt = 12; // Sanitise led count.
 		}
-		// Convert progress to an LED number.
+		cledG <: 1;
+		cledR <: 0;
 		showPattern(lights, lCnt, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 	}
 
 	cledG <: 0;
 	cledR <: 1;
 	showPattern(lights, 12, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+
+	cledG <: 0;
+	cledR <: 0;
 
 	// Shut off LED processes
 	toQuadrant0 <: LED_STOP;
