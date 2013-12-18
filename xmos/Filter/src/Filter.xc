@@ -22,11 +22,12 @@ out port cledR = PORT_CLOCKLED_SELR;
 
 #define ROUNDS 2
 
-#define IMAGE "src/test0.pgm"
+//#define IMAGE "src/test0.pgm"
+#define IMAGE "src/BristolCathedral.pgm"
 #define IMAGE_OUT "bin/testout.pgm"
 #define FILEBUFF "bin/tmp.pgm"
-#define IMHT 16
-#define IMWD 16
+#define IMHT 256
+#define IMWD 400
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -173,7 +174,7 @@ void DataInStream(char infname[], char filebuff[], chanend c_out, chanend loop)
 
     for (round = 0; round < ROUNDS; round++) {
 #ifdef DBGPRT
-    printf("DataInStream: Starting round %d...\n", round);
+    	printf("DataInStream: Starting round %d...\n", round);
 #endif
     	if (round == 0) {
     		res = _openinpgm( infname, IMWD, IMHT );
@@ -196,12 +197,11 @@ void DataInStream(char infname[], char filebuff[], chanend c_out, chanend loop)
 			return;
 		}
 
-		for( int y = 0; y < IMHT && round < ROUNDS; y++ )
+		for( int y = 0; y < IMHT; y++ )
 		{
 			_readinline( line, IMWD );
 			for( int x = 0; x < IMWD; x++ )
 			{
-				c_out <: line[ x ];
 				select {
 					case c_out :> res:
 						y = IMHT;
@@ -209,12 +209,13 @@ void DataInStream(char infname[], char filebuff[], chanend c_out, chanend loop)
 						round = ROUNDS;
 						break;
 					default:
+						c_out <: line[ x ];
 						break;
 				}
 			}
 		}
 
-		_closeinpgm();
+    _closeinpgm();
     }
 
     loop :> res;
