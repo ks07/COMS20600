@@ -20,10 +20,10 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define IMAGE "src/test0.pgm"
+#define IMAGE "src/BristolCathedral.pgm"
 #define IMAGE_OUT "bin/testout.pgm"
-#define IMHT 16
-#define IMWD 16
+#define IMHT 256
+#define IMWD 400
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -182,13 +182,13 @@ void DataInStream(char infname[], chanend c_out)
         _readinline( line, IMWD );
         for( int x = 0; x < IMWD; x++ )
         {
-            c_out <: line[ x ];
             select {
             	case c_out :> res:
             		y = IMHT;
             		x = IMWD;
             		break;
             	default:
+                    c_out <: line[ x ];
             		break;
             }
         }
