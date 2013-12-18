@@ -66,7 +66,9 @@ void showLED(out port p, chanend fromVisualiser) {
 	}
 
 	p <: 0; // Shut off lights before quit.
+#ifdef DBGPRT
 	printf("LED quad finished\n");
+#endif
 }
 
 // Displays an arbitrary pattern on LEDs. Takes an array of active LED numbers.
@@ -122,7 +124,9 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 	toQuadrant2 <: LED_STOP;
 	toQuadrant3 <: LED_STOP;
 
+#ifdef DBGPRT
 	printf("Visualiser: finished\n");
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -135,12 +139,16 @@ void DataInStream(char infname[], chanend c_out)
     int res;
     uchar line[ IMWD ];
 
+#ifdef DBGPRT
     printf( "DataInStream:Start...\n" );
+#endif
 
     res = _openinpgm( infname, IMWD, IMHT );
     if( res )
     {
+#ifdef DBGPRT
         printf( "DataInStream:Error openening %s\n.", infname );
+#endif
         return;
     }
 
@@ -162,7 +170,9 @@ void DataInStream(char infname[], chanend c_out)
     }
 
     _closeinpgm();
+#ifdef DBGPRT
     printf( "DataInStream:Done...\n" );
+#endif
     return;
 }
 
@@ -177,7 +187,9 @@ int getWaiting(chanend workers[], int last) {
                 if (temp == WORKER_RDY) {
                     waiting = i;
                 } else {
+#ifdef DBGPRT
                     printf("ISSUES\n");
+#endif
                 }
                 break;
             default:
@@ -206,10 +218,14 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
         select {
             case buttonListener :> temp:
             	if (temp == BTN_STOP) {
+#ifdef DBGPRT
             		printf("Button Stop\n");
+#endif
             		shutdown = 1;
             	} else if (temp == BTN_PAUSE) {
+#ifdef DBGPRT
 					printf("Button Paused\n");
+#endif
 					while (temp != BTN_RES) {
 						buttonListener :> temp;
 					}
@@ -223,7 +239,9 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
         	workRemaining = 0; // Set workRemaining so we don't try to continue.
         } else {
 			cWorker = getWaiting(toWorker, cWorker);
+#ifdef DBGPRT
 			printf("Sending slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
+#endif
 			// height gives number of rows the worker must OUTPUT (i.e. input + 2)
 
 			toWorker[cWorker] <: NSLICE - workRemaining;
@@ -257,7 +275,9 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
     }
     if (!shutdown) {
 		cWorker = getWaiting(toWorker, cWorker);
+#ifdef DBGPRT
 		printf("Sending final slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
+#endif
 		toWorker[cWorker] <: NSLICE - workRemaining;
 		toWorker[cWorker] <: IMWD;
 		toWorker[cWorker] <: IMHT % SLICEH;
@@ -298,7 +318,9 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
     }
     c_in <: 0;
 
+#ifdef DBGPRT
     printf( "Distributor:Done...\n" );
+#endif
 }
 
 unsigned int ind(unsigned int x, unsigned int y, unsigned int width) {
@@ -320,12 +342,16 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 	while (width > 0 && height > 0) {
 		fromDistributor :> pos;
 
+#ifdef DBGPRT
 		printf("[%d] collecting %d px\n", id, (height+2) * width);
+#endif
 		for (i = 0; i < (height + 2) * width; i++) {
 			fromDistributor :> block[i];
 		}
 
+#ifdef DBGPRT
 		printf("[%d] Telling collector our slice: %d and size %d.\n", id, sliceNo, height * IMWD);
+#endif
 		toCollector <: sliceNo;
 		toCollector <: height * IMWD;
 		// TODO: width needs a buffer either side
@@ -344,17 +370,23 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 			}
 		}
 
+#ifdef DBGPRT
 		printf("[%d] done slice, sent %d to collector.\n", id, DBGSENT);
+#endif
 
 		fromDistributor <: WORKER_RDY;
 		fromDistributor :> sliceNo;
 		fromDistributor :> width;
 		fromDistributor :> height;
 	}
+#ifdef DBGPRT
 	printf("[%d] informing collector we are done.\n", id);
+#endif
 	toCollector <: -1;
 
+#ifdef DBGPRT
 	printf("[%d] Worker done\n", id);
+#endif
 }
 
 
@@ -368,12 +400,16 @@ void DataOutStream(char outfname[], chanend c_in)
     int res, tmp;
     uchar line[ IMWD ];
 
+#ifdef DBGPRT
     printf( "DataOutStream:Start...\n" );
+#endif
 
     res = _openoutpgm( outfname, IMWD, IMHT );
     if( res )
     {
+#ifdef DBGPRT
         printf( "DataOutStream:Error opening %s\n.", outfname );
+#endif
         return;
     }
     res = 1;
@@ -394,7 +430,9 @@ void DataOutStream(char outfname[], chanend c_in)
     }
 
     _closeoutpgm();
+#ifdef DBGPRT
     printf( "DataOutStream:Done...\n" );
+#endif
     return;
 }
 
@@ -416,7 +454,9 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 			if (idBuff[j] < -1) {
 				select {
 					case fromWorker[j] :> idBuff[j]:
+#ifdef DBGPRT
 						printf("Collector: [%d] told us it has %d\n", j, idBuff[j]);
+#endif
 						break;
 					default:
 						break;
@@ -439,18 +479,24 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 
 		if (!working) {
 			//All workers are dead
+#ifdef DBGPRT
 			printf("Collector: All workers gone, quitting...\n");
+#endif
 			i = NSLICE + 1;
 			// Tell data out that it's time in this world is up. Such a depressing state of affairs.
 			dataOut <: -1;
 		} else {
 			fromWorker[cWorker] :> sliceLen;
+#ifdef DBGPRT
 			printf("Collector: Reading slice %d of size %d from [%d]\n", i, sliceLen, cWorker);
+#endif
 			for (pc = 0; pc < sliceLen; pc++) {
 				fromWorker[cWorker] :> tmp;
 				dataOut <: (int)tmp;
 			}
+#ifdef DBGPRT
 			printf("Collector: Read done\n");
+#endif
 			toVis <: 1; // Tell vis that we have added another slice to output.
 			cWorker = -1;
 		}
@@ -466,7 +512,9 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	// Tell vis we are thankful for it's assistance and wish it a merry christmas
 	toVis <: -1;
 
+#ifdef DBGPRT
 	printf("Collector quitting.\n");
+#endif
 }
 
 //READ BUTTONS and send commands to Visualiser
@@ -495,7 +543,9 @@ void buttonListener(in port buttons, chanend toDistributor) {
             break;
         case BTNC:
             // C = Quit
+#ifdef DBGPRT
         	printf("Quit btn pressed.\n");
+#endif
             if (paused) {
                 toDistributor <: BTN_RES;
             }
