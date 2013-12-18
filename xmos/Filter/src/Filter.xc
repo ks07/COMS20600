@@ -20,8 +20,8 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define IMHT 256
-#define IMWD 400
+#define IMHT 16
+#define IMWD 16
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -51,6 +51,7 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define LED_STOP 15
 
 #define LED_STEP_SLICES (NSLICE + 1) / 12
+#define DBGPRT
 
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
 void showLED(out port p, chanend fromVisualiser) {
@@ -298,6 +299,27 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
 		for (x = 0; x < IMWD; x++) {
 			toWorker[cWorker] <: (char)0; // Need to send placeholder values for final row, ala buffa at first iter.
 		}
+
+		// Inform the button listener that it has no friends and nobody loves it.
+	    select {
+	    	case buttonListener :> temp:
+	    		if (temp != BTN_STOP) {
+	    			buttonListener <: 0;
+	    		}
+	    		break;
+	    	default:
+	    		buttonListener <: 0;
+	    		break;
+	    }
+    } else {
+	    // Tell data in that we don't want to hear from it no mo'
+	    select {
+	    	case c_in :> tmp:
+	    		break;
+	    	default:
+	    		break;
+	    }
+	    c_in <: 0;
     }
 
     // Need to inform workers that all work is complete.
@@ -308,15 +330,6 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
 		toWorker[cWorker] <: 0;
 		toWorker[cWorker] <: 0;
     }
-
-    // Tell data in that we don't want to hear from it no mo'
-    select {
-    	case c_in :> tmp:
-    		break;
-    	default:
-    		break;
-    }
-    c_in <: 0;
 
 #ifdef DBGPRT
     printf( "Distributor:Done...\n" );
@@ -524,8 +537,16 @@ void buttonListener(in port buttons, chanend toDistributor) {
     int paused = 1;
 
     while (running) {
-        buttons when pinsneq(15) :> buttonInput;
-        buttons when pinseq(15) :> void;
+    	select {
+    		case buttons when pinsneq(15) :> buttonInput:
+    	        buttons when pinseq(15) :> void;
+    			break;
+    		case toDistributor :> buttonInput:
+    			running = 0;
+    			buttonInput = BTND;
+    			break;
+    	}
+
         switch (buttonInput) {
         case BTNA:
             // A = Start/resume
@@ -568,7 +589,7 @@ int main() {
     par
     {
         //on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
-    	on stdcore[0]: DataInStream( "src/BristolCathedral.pgm", c_inIO );
+    	on stdcore[0]: DataInStream( "src/test0.pgm", c_inIO );
         on stdcore[0]: buttonListener(buttons, bListener);
         on stdcore[1]: distributor( toWorker, c_inIO, bListener );
         on stdcore[0]: DataOutStream( "bin/testout.pgm", c_outIO );
