@@ -20,8 +20,11 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
+#define ROUNDS 2
+
 #define IMAGE "src/test0.pgm"
 #define IMAGE_OUT "bin/testout.pgm"
+#define FILEBUFF "bin/tmp.pgm"
 #define IMHT 16
 #define IMWD 16
 
@@ -159,42 +162,62 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 // Read Image from pgm file with path and name infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[], chanend c_out)
+void DataInStream(char infname[], char filebuff[], chanend c_out, chanend loop)
 {
-    int res;
+    int res, round;
     uchar line[ IMWD ];
 
 #ifdef DBGPRT
     printf( "DataInStream:Start...\n" );
 #endif
 
-    res = _openinpgm( infname, IMWD, IMHT );
-    if( res )
-    {
+    for (round = 0; round < ROUNDS; round++) {
 #ifdef DBGPRT
-        printf( "DataInStream:Error openening %s\n.", infname );
+    printf("DataInStream: Starting round %d...\n", round);
 #endif
-        return;
+    	if (round == 0) {
+    		res = _openinpgm( infname, IMWD, IMHT );
+    	} else {
+    		// Wait for the output to be done, or shutdown signal from distrib.
+    		select {
+    			case loop :> res:
+    				res = _openinpgm( filebuff, IMWD, IMHT );
+    				break;
+    			case c_out :> res:
+    				round = ROUNDS;
+    				break;
+    		}
+    	}
+		if( res )
+		{
+#ifdef DBGPRT
+			printf( "DataInStream:Error opening %s\n.", infname );
+#endif
+			return;
+		}
+
+		for( int y = 0; y < IMHT && round < ROUNDS; y++ )
+		{
+			_readinline( line, IMWD );
+			for( int x = 0; x < IMWD; x++ )
+			{
+				c_out <: line[ x ];
+				select {
+					case c_out :> res:
+						y = IMHT;
+						x = IMWD;
+						round = ROUNDS;
+						break;
+					default:
+						break;
+				}
+			}
+		}
+
+		_closeinpgm();
     }
 
-    for( int y = 0; y < IMHT; y++ )
-    {
-        _readinline( line, IMWD );
-        for( int x = 0; x < IMWD; x++ )
-        {
-            c_out <: line[ x ];
-            select {
-            	case c_out :> res:
-            		y = IMHT;
-            		x = IMWD;
-            		break;
-            	default:
-            		break;
-            }
-        }
-    }
-
-    _closeinpgm();
+    loop :> res;
 #ifdef DBGPRT
     printf( "DataInStream:Done...\n" );
 #endif
@@ -233,117 +256,124 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
     cWorker = 0;
     shutdown = 0;
 
-    // Initialise buffb from input. buffa can stay uninitialised as it will be ignored.
-    for (x = 0; x < IMWD; x++) {
-    	c_in :> buffb[x];
-    }
+    for (int round = 0; round < ROUNDS; round++) {
+		// Initialise buffb from input. buffa can stay uninitialised as it will be ignored.
+		for (x = 0; x < IMWD; x++) {
+			c_in :> buffb[x];
+		}
 
-    for (workRemaining = NSLICE; workRemaining >= 1; workRemaining--) {
-        // Check if buttonListener is asking us to cancel or pause.
-        select {
-            case buttonListener :> temp:
-            	if (temp == BTN_STOP) {
+		for (workRemaining = NSLICE; workRemaining >= 1; workRemaining--) {
+			// Check if buttonListener is asking us to cancel or pause.
+			select {
+				case buttonListener :> temp:
+					if (temp == BTN_STOP) {
 #ifdef DBGPRT
-            		printf("Button Stop\n");
+						printf("Button Stop\n");
 #endif
-            		shutdown = 1;
-            	} else if (temp == BTN_PAUSE) {
+						shutdown = 1;
+					} else if (temp == BTN_PAUSE) {
 #ifdef DBGPRT
-					printf("Button Paused\n");
+						printf("Button Paused\n");
 #endif
-					while (temp != BTN_RES) {
-						buttonListener :> temp;
+						while (temp != BTN_RES) {
+							buttonListener :> temp;
+						}
+					}
+					break;
+				default:
+					break;
+			}
+
+			if (shutdown) {
+				workRemaining = 0; // Set workRemaining so we don't try to continue.
+			} else {
+				cWorker = getWaiting(toWorker, cWorker);
+#ifdef DBGPRT
+				printf("Sending slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
+#endif
+				// height gives number of rows the worker must OUTPUT (i.e. input + 2)
+
+				toWorker[cWorker] <: NSLICE - workRemaining;
+				toWorker[cWorker] <: IMWD;
+				toWorker[cWorker] <: SLICEH;
+				if (workRemaining == NSLICE) {
+					toWorker[cWorker] <: (char) (N | E | W);
+				} else {
+					toWorker[cWorker] <: (char) (E | W);
+				}
+				for (x = 0; x < IMWD; x++) {
+					toWorker[cWorker] <: buffa[x]; // Row already output, calc only.
+				}
+				for (x = 0; x < IMWD; x++) {
+					toWorker[cWorker] <: buffb[x]; // First row to output.
+				}
+				for (y = 0; y < SLICEH; y++) { // Send the rest of the output rows, as well as buffer row.
+					for (x = 0; x < IMWD; x++) {
+						c_in :> tmp;
+						toWorker[cWorker] <: tmp;
+						if (y == SLICEH - 2) {
+							// 2nd last line, i.e. final output line.
+							buffa[x] = tmp;
+						} else if (y == SLICEH - 1) {
+							// Last line, the next worker will output this.
+							buffb[x] = tmp;
+						}
 					}
 				}
-                break;
-            default:
-                break;
-        }
-
-		if (shutdown) {
-        	workRemaining = 0; // Set workRemaining so we don't try to continue.
-        } else {
+			}
+		}
+		if (!shutdown) {
 			cWorker = getWaiting(toWorker, cWorker);
 #ifdef DBGPRT
-			printf("Sending slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
+			printf("Sending final slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
 #endif
-			// height gives number of rows the worker must OUTPUT (i.e. input + 2)
-
 			toWorker[cWorker] <: NSLICE - workRemaining;
 			toWorker[cWorker] <: IMWD;
-			toWorker[cWorker] <: SLICEH;
-			if (workRemaining == NSLICE) {
-				toWorker[cWorker] <: (char) (N | E | W);
-			} else {
-				toWorker[cWorker] <: (char) (E | W);
-			}
+			toWorker[cWorker] <: IMHT % SLICEH;
+			toWorker[cWorker] <: (char) (S | E | W);
 			for (x = 0; x < IMWD; x++) {
 				toWorker[cWorker] <: buffa[x]; // Row already output, calc only.
 			}
 			for (x = 0; x < IMWD; x++) {
 				toWorker[cWorker] <: buffb[x]; // First row to output.
 			}
-			for (y = 0; y < SLICEH; y++) { // Send the rest of the output rows, as well as buffer row.
+			for (y = 1; y < IMHT % SLICEH; y++) {
 				for (x = 0; x < IMWD; x++) {
 					c_in :> tmp;
 					toWorker[cWorker] <: tmp;
-					if (y == SLICEH - 2) {
-						// 2nd last line, i.e. final output line.
-						buffa[x] = tmp;
-					} else if (y == SLICEH - 1) {
-						// Last line, the next worker will output this.
-						buffb[x] = tmp;
-					}
+					// Can ignore buff now.
 				}
 			}
-        }
-    }
-    if (!shutdown) {
-		cWorker = getWaiting(toWorker, cWorker);
-#ifdef DBGPRT
-		printf("Sending final slice %d/%d to worker %d\n", NSLICE - workRemaining, NSLICE, cWorker);
-#endif
-		toWorker[cWorker] <: NSLICE - workRemaining;
-		toWorker[cWorker] <: IMWD;
-		toWorker[cWorker] <: IMHT % SLICEH;
-		toWorker[cWorker] <: (char) (S | E | W);
-		for (x = 0; x < IMWD; x++) {
-			toWorker[cWorker] <: buffa[x]; // Row already output, calc only.
-		}
-		for (x = 0; x < IMWD; x++) {
-			toWorker[cWorker] <: buffb[x]; // First row to output.
-		}
-		for (y = 1; y < IMHT % SLICEH; y++) {
 			for (x = 0; x < IMWD; x++) {
-				c_in :> tmp;
-				toWorker[cWorker] <: tmp;
-				// Can ignore buff now.
+				toWorker[cWorker] <: (char)0; // Need to send placeholder values for final row, ala buffa at first iter.
 			}
-		}
-		for (x = 0; x < IMWD; x++) {
-			toWorker[cWorker] <: (char)0; // Need to send placeholder values for final row, ala buffa at first iter.
-		}
 
-		// Inform the button listener that it has no friends and nobody loves it.
-	    select {
-	    	case buttonListener :> temp:
-	    		if (temp != BTN_STOP) {
-	    			buttonListener <: 0;
-	    		}
-	    		break;
-	    	default:
-	    		buttonListener <: 0;
-	    		break;
-	    }
-    } else {
-	    // Tell data in that we don't want to hear from it no mo'
-	    select {
-	    	case c_in :> tmp:
-	    		break;
-	    	default:
-	    		break;
-	    }
-	    c_in <: 0;
+		} else {
+			// Tell data in that we don't want to hear from it no mo'
+			select {
+				case c_in :> tmp:
+					break;
+				default:
+					break;
+			}
+			c_in <: 0;
+		}
+		printf("Distributor: Done round %d\n", round);
+    }// Round finish
+
+
+    if (!shutdown) {
+		// Inform the button listener that it has no friends and nobody loves it, if it wasn't the one who killed us.
+		select {
+			case buttonListener :> temp:
+				if (temp != BTN_STOP) {
+					buttonListener <: 0;
+				}
+				break;
+			default:
+				buttonListener <: 0;
+				break;
+		}
     }
 
     // Need to inform workers that all work is complete.
@@ -432,44 +462,62 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 // Write pixel stream from channel c_in to pgm image file
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataOutStream(char outfname[], chanend c_in)
+void DataOutStream(char outfname[], char fileBuff[], chanend c_in, chanend loop)
 {
-    int res, tmp;
+    int res, tmp, round;
     uchar line[ IMWD ];
 
 #ifdef DBGPRT
-    printf( "DataOutStream:Start...\n" );
+    printf( "DataOutStream: Start...\n" );
 #endif
 
-    res = _openoutpgm( outfname, IMWD, IMHT );
-    if( res )
-    {
+    for (round = 0; round < ROUNDS; round++) {
 #ifdef DBGPRT
-        printf( "DataOutStream:Error opening %s\n.", outfname );
+    	printf("DataOutStream: Starting round %d...\n", round);
 #endif
-        return;
-    }
-    res = 1;
-    for( int y = 0; y < IMHT; y++ )
-    {
-        for( int x = 0; x < IMWD; x++ )
-        {
-        	c_in :> tmp;
-        	if (tmp < 0) {
-        		// This line means we should give up, all hope is lost.
-        		x = IMWD;
-        		y = IMHT;
-        	} else {
-        		line[x] = (uchar) tmp;
-        	}
-        }
-        _writeoutline( line, IMWD );
-    }
+    	if (round == ROUNDS - 1) {
+    		res = _openoutpgm( outfname, IMWD, IMHT );
+    	} else {
+    		res = _openoutpgm( fileBuff, IMWD, IMHT );
+    	}
+		if( res )
+		{
+	#ifdef DBGPRT
+			printf( "DataOutStream: Error opening %s\n.", outfname );
+	#endif
+			return;
+		}
+		res = 1;
+		for( int y = 0; y < IMHT; y++ )
+		{
+			for( int x = 0; x < IMWD; x++ )
+			{
+				c_in :> tmp;
+				if (tmp < 0) {
+					// This line means we should give up, all hope is lost.
+					x = IMWD;
+					y = IMHT;
+					round = ROUNDS;
+				} else {
+					line[x] = (uchar) tmp;
+				}
+			}
+			_writeoutline( line, IMWD );
+		}
 
-    _closeoutpgm();
+		_closeoutpgm();
+		loop <: 0;
+    }
 #ifdef DBGPRT
-    printf( "DataOutStream:Done...\n" );
+    printf( "DataOutStream: Done...\n" );
 #endif
+    // Read from loop in case it was waiting on us.
+    select {
+    	case loop :> tmp:
+    		break;
+    	default:
+    		break;
+    }
     return;
 }
 
@@ -477,66 +525,76 @@ void DataOutStream(char outfname[], chanend c_in)
 void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	uchar tmp;
 	int i, j, x, cWorker, pc, cTotal, idBuff[WORKERNO], sliceLen, working;
-	cWorker = -1;
-	// Buffer from other workers.
-	for (i = 0; i < WORKERNO; i++) {
-		idBuff[i] = -2;
-	}
 
-	for (i = 0; i <= NSLICE; i++) {
-		working = 1;
-		for (j = 0; (cWorker < 0 || cWorker >= WORKERNO) && working; j = (j + 1) % WORKERNO) {
-			// Attempt a read from every worker until we find the next slice ID, i.e. i. Must buffer read values to avoid reading data prematurely.
-			// If idBuff[j] == -1, that worker is dead. If < -1, read.
-			if (idBuff[j] < -1) {
-				select {
-					case fromWorker[j] :> idBuff[j]:
+	for (int round = 0; round < ROUNDS; round++) {
 #ifdef DBGPRT
-						printf("Collector: [%d] told us it has %d\n", j, idBuff[j]);
+		printf("Collector: start round %d\n", round);
 #endif
-						break;
-					default:
-						break;
+		cWorker = -1;
+		// Buffer from other workers.
+		for (i = 0; i < WORKERNO; i++) {
+			idBuff[i] = -2;
+		}
+
+		for (i = 0; i <= NSLICE; i++) {
+			working = 1;
+			for (j = 0; (cWorker < 0 || cWorker >= WORKERNO) && working; j = (j + 1) % WORKERNO) {
+				// Attempt a read from every worker until we find the next slice ID, i.e. i. Must buffer read values to avoid reading data prematurely.
+				// If idBuff[j] == -1, that worker is dead. If < -1, read.
+				if (idBuff[j] < -1) {
+					select {
+						case fromWorker[j] :> idBuff[j]:
+	#ifdef DBGPRT
+							printf("Collector: [%d] told us it has %d\n", j, idBuff[j]);
+	#endif
+							break;
+						default:
+							break;
+					}
+				}
+				if (idBuff[j] == i) {
+					cWorker = j;
+					idBuff[j] = -2;
+				}
+				cTotal = 0;
+				for (x = 0; x < WORKERNO; x++) {
+					if (idBuff[x] == -1) {
+						cTotal--;
+					}
+				}
+				if (cTotal == -4) {
+					working = 0;
 				}
 			}
-			if (idBuff[j] == i) {
-				cWorker = j;
-				idBuff[j] = -2;
-			}
-			cTotal = 0;
-			for (x = 0; x < WORKERNO; x++) {
-				if (idBuff[x] == -1) {
-					cTotal--;
+
+			if (!working) {
+				//All workers are dead
+	#ifdef DBGPRT
+				printf("Collector: All workers gone, quitting...\n");
+	#endif
+				i = NSLICE + 1;
+				// Tell data out that it's time in this world is up. Such a depressing state of affairs.
+				dataOut <: -1;
+			} else {
+				fromWorker[cWorker] :> sliceLen;
+	#ifdef DBGPRT
+				printf("Collector: Reading slice %d of size %d from [%d]\n", i, sliceLen, cWorker);
+	#endif
+				for (pc = 0; pc < sliceLen; pc++) {
+					fromWorker[cWorker] :> tmp;
+					dataOut <: (int)tmp;
 				}
-			}
-			if (cTotal == -4) {
-				working = 0;
+	#ifdef DBGPRT
+				printf("Collector: Read done\n");
+	#endif
+				toVis <: 1; // Tell vis that we have added another slice to output.
+				cWorker = -1;
 			}
 		}
 
-		if (!working) {
-			//All workers are dead
 #ifdef DBGPRT
-			printf("Collector: All workers gone, quitting...\n");
+		printf("Collector: end round %d\n", round);
 #endif
-			i = NSLICE + 1;
-			// Tell data out that it's time in this world is up. Such a depressing state of affairs.
-			dataOut <: -1;
-		} else {
-			fromWorker[cWorker] :> sliceLen;
-#ifdef DBGPRT
-			printf("Collector: Reading slice %d of size %d from [%d]\n", i, sliceLen, cWorker);
-#endif
-			for (pc = 0; pc < sliceLen; pc++) {
-				fromWorker[cWorker] :> tmp;
-				dataOut <: (int)tmp;
-			}
-#ifdef DBGPRT
-			printf("Collector: Read done\n");
-#endif
-			toVis <: 1; // Tell vis that we have added another slice to output.
-			cWorker = -1;
-		}
 	}
 
 	// Wait until all workers are dead before sepuku
@@ -608,14 +666,14 @@ void buttonListener(in port buttons, chanend toDistributor) {
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
 int main() {
-    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], toVis, quad0, quad1, quad2, quad3, bListener;
+    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], toVis, quad0, quad1, quad2, quad3, bListener, fLoop;
 
     par
     {
-    	on stdcore[0]: DataInStream( IMAGE, c_inIO );
+    	on stdcore[0]: DataInStream( IMAGE, FILEBUFF, c_inIO, fLoop );
         on stdcore[0]: buttonListener(buttons, bListener);
         on stdcore[1]: distributor( toWorker, c_inIO, bListener );
-        on stdcore[0]: DataOutStream( IMAGE_OUT, c_outIO );
+        on stdcore[0]: DataOutStream( IMAGE_OUT, FILEBUFF, c_outIO, fLoop );
         on stdcore[2]: collector(fromWorker, c_outIO, toVis);
 		on stdcore[0]: visualiser(toVis,quad0,quad1,quad2,quad3);
 		on stdcore[0]: showLED(cled0,quad0);
