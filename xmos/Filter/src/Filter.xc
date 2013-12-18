@@ -43,7 +43,8 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define BTNC 11
 #define BTND 7
 #define BTN_STOP 0
-#define BTN_PAUSERES 1
+#define BTN_PAUSE 1
+#define BTN_RES 2
 
 #define WORKER_RDY 1
 
@@ -207,9 +208,9 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
             	if (temp == BTN_STOP) {
             		printf("Button Stop\n");
             		shutdown = 1;
-            	} else if (temp == BTN_PAUSERES) {
+            	} else if (temp == BTN_PAUSE) {
 					printf("Button Paused\n");
-					while (temp != BTN_PAUSERES) {
+					while (temp != BTN_RES) {
 						buttonListener :> temp;
 					}
 				}
@@ -304,16 +305,12 @@ unsigned int ind(unsigned int x, unsigned int y, unsigned int width) {
 	return (y * width) + x;
 }
 
-unsigned int onedge(unsigned int i, unsigned int w, unsigned int h) {
-	return (i < w || i % w == 0 || i % w == w - 1 || i >= w * (h - 1));
-}
-
 void worker(int id, chanend fromDistributor, chanend toCollector) {
 	char pos;
 	int height, width, sliceNo, DBGSENT;
 	unsigned int x, y, i;
-	char temp;
-	char block[BLOCKSIZE];
+	uchar temp;
+	uchar block[BLOCKSIZE];
 
 	fromDistributor <: WORKER_RDY;
 	fromDistributor :> sliceNo;
@@ -486,13 +483,13 @@ void buttonListener(in port buttons, chanend toDistributor) {
             // A = Start/resume
             if (paused) {
                 paused = 0;
-                toDistributor <: BTN_PAUSERES;
+                toDistributor <: BTN_RES;
             }
             break;
         case BTNB:
             // B = Pause
             if (!paused) {
-                toDistributor <: BTN_PAUSERES;
+                toDistributor <: BTN_PAUSE;
                 paused = 1;
             }
             break;
@@ -500,7 +497,7 @@ void buttonListener(in port buttons, chanend toDistributor) {
             // C = Quit
         	printf("Quit btn pressed.\n");
             if (paused) {
-                toDistributor <: BTN_PAUSERES;
+                toDistributor <: BTN_RES;
             }
             toDistributor <: BTN_STOP;
             running = 0;
