@@ -20,12 +20,13 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define ROUNDS 2
+#define ROUNDS 5
 
 //#define IMAGE "src/test0.pgm"
 #define IMAGE "src/BristolCathedral.pgm"
 #define IMAGE_OUT "bin/testout.pgm"
-#define FILEBUFF "bin/tmp.pgm"
+#define FILEBUFFA "bin/tmpa.pgm"
+#define FILEBUFFB "bin/tmpb.pgm"
 #define IMHT 256
 #define IMWD 400
 
@@ -56,8 +57,8 @@ out port cledR = PORT_CLOCKLED_SELR;
 
 #define LED_STOP 15
 
-#define LED_STEP_SLICES (NSLICE + 1) / 12
-#define DBGPRT
+#define LED_STEP_SLICES (NSLICE + 1) * ROUNDS / 12
+//#define DBGPRT
 
 // Timing for the system
 void time(chanend fromDistributor, chanend fromCollector) {
@@ -197,7 +198,7 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 // Read Image from pgm file with path and name infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[], char filebuff[], chanend c_out, chanend loop)
+void DataInStream(char infname[], char filebuffa[], char filebuffb[], chanend c_out, chanend loop)
 {
     int res, round;
     uchar line[ IMWD ];
@@ -216,7 +217,11 @@ void DataInStream(char infname[], char filebuff[], chanend c_out, chanend loop)
     		// Wait for the output to be done, or shutdown signal from distrib.
     		select {
     			case loop :> res:
-    				res = _openinpgm( filebuff, IMWD, IMHT );
+    				if (round & 1) {
+    					res = _openinpgm( filebuffa, IMWD, IMHT );
+    				} else {
+    					res = _openinpgm( filebuffb, IMWD, IMHT );
+    				}
     				break;
     			case c_out :> res:
     				round = ROUNDS;
@@ -498,7 +503,7 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 // Write pixel stream from channel c_in to pgm image file
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataOutStream(char outfname[], char fileBuff[], chanend c_in, chanend loop)
+void DataOutStream(char outfname[], char fileBuffA[], char fileBuffB[], chanend c_in, chanend loop)
 {
     int res, tmp, round;
     uchar line[ IMWD ];
@@ -514,7 +519,11 @@ void DataOutStream(char outfname[], char fileBuff[], chanend c_in, chanend loop)
     	if (round == ROUNDS - 1) {
     		res = _openoutpgm( outfname, IMWD, IMHT );
     	} else {
-    		res = _openoutpgm( fileBuff, IMWD, IMHT );
+			if (round & 1) {
+				res = _openoutpgm( fileBuffB, IMWD, IMHT );
+			} else {
+				res = _openoutpgm( fileBuffA, IMWD, IMHT );
+			}
     	}
 		if( res )
 		{
@@ -707,9 +716,9 @@ int main() {
 
     par
     {
-    	on stdcore[0]: DataInStream( IMAGE, FILEBUFF, c_inIO, fLoop );
+    	on stdcore[0]: DataInStream( IMAGE, FILEBUFFA, FILEBUFFB, c_inIO, fLoop );
         on stdcore[0]: buttonListener(buttons, bListener);
-        on stdcore[0]: DataOutStream( IMAGE_OUT, FILEBUFF, c_outIO, fLoop );
+        on stdcore[0]: DataOutStream( IMAGE_OUT, FILEBUFFA, FILEBUFFB, c_outIO, fLoop );
         on stdcore[1]: distributor( toWorker, c_inIO, bListener, dTimer);
         on stdcore[2]: collector(fromWorker, c_outIO, toVis, cTimer);
         on stdcore[3]: time(dTimer, cTimer);
