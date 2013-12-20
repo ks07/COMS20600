@@ -111,11 +111,11 @@ void time(chanend fromDistributor, chanend fromCollector) {
         }
 //        printf("overallTime = %d oldOverallTime = %d\n", overallTime, oldOverallTime);
     }
-    printf("overflow count = %d\n", overflowCount);
-    printf("overallTime = %d\n", overallTime);
+    printf("overflow count = %u\n", overflowCount);
+    printf("overallTime = %u\n", overallTime);
     overallTime = overallTime / 100000;
     overallTime = overflowCount * 42949 + overallTime;
-    printf("Overall time running was %dms\n", overallTime);
+    printf("Overall time running was %ums\n", overallTime);
 }
 
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
