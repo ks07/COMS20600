@@ -20,7 +20,7 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define ROUNDS 5
+#define ROUNDS 1
 
 //#define IMAGE "src/test0.pgm"
 #define IMAGE "src/BristolCathedral.pgm"
@@ -40,7 +40,7 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define BLACK 0
 
 #define WORKERNO 4
-#define SLICEH 3
+#define SLICEH 10
 #define NSLICE (IMHT/SLICEH) // The number of full slices.
 #define BLOCKSIZE (IMWD * (SLICEH+2))
 
@@ -137,6 +137,8 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 	int progress = 0;
 	int lCnt, sCnt, perStep;
 	int lights[] = {0,1,2,3,4,5,6,7,8,9,10,11};
+	timer tmr;
+	unsigned int t;
 	lCnt = 0;
 	sCnt = 0;
 
@@ -179,6 +181,8 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 	cledG <: 0;
 	cledR <: 1;
 	showPattern(lights, 12, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+	tmr :> t;
+	tmr when timerafter(t + 5000000) :> void;
 
 	cledG <: 0;
 	cledR <: 0;
@@ -277,7 +281,7 @@ int getWaiting(chanend workers[], int last) {
                     waiting = i;
                 } else {
 #ifdef DBGPRT
-                    printf("ISSUES\n");
+                    printf("Accidentally pulling data from worker!\n");
 #endif
                 }
                 break;
@@ -400,7 +404,9 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener, chane
 			}
 			c_in <: 0;
 		}
+#ifdef DBGPRT
 		printf("Distributor: Done round %d\n", round);
+#endif
     }// Round finish
 
 
