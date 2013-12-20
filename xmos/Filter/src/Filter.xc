@@ -163,23 +163,24 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 	int lights[] = {0,1,2,3,4,5,6,7,8,9,10,11};
 	lCnt = 0;
 	sCnt = 0;
-	perStep = 1;
 
 	cledG <: 0;
 	cledR <: 1;
 
 	showPattern(lights, 12, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
 
-	if (NSLICE <= 1) {
+	if (NSLICE * ROUNDS <= 1) {
 		perStep = 12;
-	} else if (NSLICE <= 2) {
+	} else if (NSLICE * ROUNDS <= 2) {
 		perStep = 6;
-	} else if (NSLICE <= 3) {
+	} else if (NSLICE * ROUNDS <= 3) {
 		perStep = 4;
-	} else if (NSLICE <= 4) {
+	} else if (NSLICE * ROUNDS <= 4) {
 		perStep = 3;
-	} else if (NSLICE <= 6) {
+	} else if (NSLICE * ROUNDS <= 6) {
 		perStep = 2;
+	} else {
+		perStep = 1;
 	}
 
 	// We have less slices than we have LEDs, so we gotta fudge the numbers.
