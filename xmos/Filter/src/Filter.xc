@@ -20,15 +20,16 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define ROUNDS 1
+#define ROUNDS 4
 
-//#define IMAGE "src/test0.pgm"
-#define IMAGE "src/BristolCathedral.pgm"
+#define IMAGE "src/test0.pgm"
+//#define IMAGE "src/BristolCathedral.pgm"
+//#define IMAGE "src/spaceship.pgm"
 #define IMAGE_OUT "bin/testout.pgm"
 #define FILEBUFFA "bin/tmpa.pgm"
 #define FILEBUFFB "bin/tmpb.pgm"
-#define IMHT 256
-#define IMWD 400
+#define IMWD 16
+#define IMHT 16
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -40,7 +41,7 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define BLACK 0
 
 #define WORKERNO 4
-#define SLICEH 10
+#define SLICEH 3
 #define NSLICE (IMHT/SLICEH) // The number of full slices.
 #define BLOCKSIZE (IMWD * (SLICEH+2))
 
@@ -58,7 +59,7 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define LED_STOP 15
 
 #define LED_STEP_SLICES (NSLICE + 1) * ROUNDS / 12
-//#define DBGPRT
+#define DBGPRT
 
 // Timing for the system
 void time(chanend fromDistributor, chanend fromCollector) {
@@ -449,6 +450,7 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 	unsigned int x, y, i;
 	uchar temp;
 	uchar block[BLOCKSIZE];
+	uchar resBuff[IMWD][SLICEH]; // Smaller buffer to hold results
 
 	fromDistributor <: WORKER_RDY;
 	fromDistributor :> sliceNo;
@@ -470,7 +472,7 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 #endif
 		toCollector <: sliceNo;
 		toCollector <: height * IMWD;
-		// TODO: width needs a buffer either side
+
 		DBGSENT = 0;
 		// Start one pixel in in either direction.
 		for (y = 1; y <= height; y++) {
@@ -480,15 +482,29 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 				} else {
 					temp = (block[ind(x,y,width)] + block[ind(x+1,y,width)] + block[ind(x-1,y,width)] + block[ind(x,y-1,width)] + block[ind(x,y+1,width)] + block[ind(x-1,y-1,width)] + block[ind(x-1,y+1,width)] + block[ind(x+1,y-1,width)] + block[ind(x+1,y+1,width)]) / 9;
 				}
-				toCollector <: temp;
+				resBuff[x][y-1] = temp;
+				//toCollector <: temp;
 				DBGSENT++;
 			}
 		}
 
 #ifdef DBGPRT
-		printf("[%d] done slice, sent %d to collector.\n", id, DBGSENT);
+		printf("[%d] done slice, processed %dpx.\n", id, DBGSENT);
 #endif
 
+		// Start sending results as soon as possible.
+		for (y = 0; y < height; y++) {
+			for (x = 0; x < width; x++) {
+				toCollector <: resBuff[x][y];
+			}
+		}
+
+#ifdef DBGPRT
+		printf("[%d] slice sent to collector.\n", id, DBGSENT);
+#endif
+
+		// We could possibly interleave sending/waiting to send to the collector with receiving data from distributor.
+		// The only issue being we may distribute chunks in a biased fashion, which could hurt performance.
 		fromDistributor <: WORKER_RDY;
 		fromDistributor :> sliceNo;
 		fromDistributor :> width;
