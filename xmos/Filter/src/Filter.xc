@@ -20,7 +20,7 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define ROUNDS 5
+#define ROUNDS 1
 
 //#define IMAGE "src/test0.pgm"
 #define IMAGE "src/BristolCathedral.pgm"
@@ -63,35 +63,59 @@ out port cledR = PORT_CLOCKLED_SELR;
 // Timing for the system
 void time(chanend fromDistributor, chanend fromCollector) {
     timer tmr;
-    unsigned int startTime, endTime, collectTime, checkTime, overallTime;
+    unsigned int startTime, endTime, collectTime, oldTime, overallTime, oldOverallTime, overflowCount;
     int temp, x;
     x = 1;
     fromDistributor :> temp;
     tmr :> startTime;
     startTime = startTime;
-    checkTime = startTime;
+    oldTime = startTime;
+    overflowCount = 0;
     overallTime = 0;
+    oldOverallTime = 0;
     while (x) {
         select {
-            case fromCollector :> temp:
-                 tmr :> endTime;
-                 x = 0;
-                 break;
-//            case tmr :> collectTime:
-//                collectTime = collectTime;
-//                if (collectTime > checkTime) {
-//                    overallTime = overallTime + checkTime + (collectTime - checkTime);
-//                    checkTime = collectTime - checkTime;
-//                } else {
-//                    overallTime = overallTime + checkTime + collectTime;
-//                    checkTime = collectTime;
-//                }
-//                break;
+            case tmr :> collectTime:
+//                printf("collectTime = %d oldTime = %d overallTime = %d oldOverallTime = %d\n", collectTime, oldTime, overallTime, oldOverallTime);
+                if (collectTime > oldTime && overallTime >= oldOverallTime) {
+                    overallTime = overallTime + collectTime - oldTime;
+//                    printf("Yay\n");
+                } else if (overallTime < oldOverallTime) {
+                    overflowCount++;
+//                    overallTime = overallTime + collectTime - oldTime;
+                } else {
+                    printf("Overflow\n");
+                    overallTime = overallTime + collectTime;
+                }
+                oldOverallTime = overallTime;
+                oldTime = collectTime;
+                break;
             default:
                  break;
         }
+        select {
+            case fromCollector :> temp:
+                 tmr :> endTime;
+                if (endTime > oldTime && overallTime > oldOverallTime) {
+                    overallTime = overallTime + endTime - oldTime;
+                } else if (overallTime <= oldOverallTime){
+                    overflowCount++;
+//                    overallTime = overallTime + collectTime - oldTime;
+                } else {
+                    overallTime = overallTime + endTime;
+                }
+                x = 0;
+                break;
+            default:
+                break;
+        }
+//        printf("overallTime = %d oldOverallTime = %d\n", overallTime, oldOverallTime);
     }
-    printf("Overall time running was %dms\n", (endTime - startTime)/100000);
+    printf("overflow count = %d\n", overflowCount);
+    printf("overallTime = %d\n", overallTime);
+    overallTime = overallTime / 100000;
+    overallTime = overflowCount * 42949 + overallTime;
+    printf("Overall time running was %dms\n", overallTime);
 }
 
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
@@ -650,8 +674,8 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis, chanend toT
 	}
 
 	// Tell vis we are thankful for it's assistance and wish it a merry christmas
+    toTimer <: 1;
 	toVis <: -1;
-	toTimer <: 1;
 
 #ifdef DBGPRT
 	printf("Collector quitting.\n");
