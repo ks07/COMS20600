@@ -21,16 +21,16 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define ROUNDS 20
+#define ROUNDS 50
 
-//#define IMAGE "src/test0.pgm"
-#define IMAGE "src/BristolCathedral.pgm"
+#define IMAGE "src/test0.pgm"
+//#define IMAGE "src/BristolCathedral.pgm"
 //#define IMAGE "src/spaceship.pgm"
 #define IMAGE_OUT "bin/testout.pgm"
 #define FILEBUFFA "bin/tmpa.pgm"
 #define FILEBUFFB "bin/tmpb.pgm"
-#define IMWD 400
-#define IMHT 256
+#define IMWD 16
+#define IMHT 16
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -60,7 +60,7 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define LED_STOP 15
 
 #define LED_STEP_SLICES (NSLICE + 1) * ROUNDS / 12
-//#define DBGPRT
+#define DBGPRT
 
 #define OVERFLOW_LIM (UINT_MAX - 7295)
 
@@ -265,7 +265,13 @@ void DataInStream(char infname[], char filebuffa[], char filebuffb[], chanend c_
     _closeinpgm();
     }
 
-    loop :> res;
+    select {
+    	case c_out :> res:
+    		break;
+    	case loop :> res:
+    		break;
+    }
+
 #ifdef DBGPRT
     printf( "DataInStream:Done...\n" );
 #endif
@@ -296,20 +302,41 @@ int getWaiting(chanend workers[], int last) {
     return waiting;
 }
 
-void distributor(chanend toWorker[], chanend c_in, chanend buttonListener, chanend toTimer) {
+void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
     int cWorker, x, y, workRemaining, temp, shutdown, i;
     uchar buffa[IMWD], buffb[IMWD], tmp;
     //Blocking till button A is pressed
     buttonListener :> temp;
     printf("Starting blur of %s (%d x %dpx) %d time(s).\n", IMAGE, IMWD, IMHT, ROUNDS);
-    toTimer <: 1;
+    //toTimer <: 1;
     cWorker = 0;
     shutdown = 0;
 
     for (int round = 0; round < ROUNDS; round++) {
 		// Initialise buffb from input. buffa can stay uninitialised as it will be ignored.
 		for (x = 0; x < IMWD; x++) {
-			c_in :> buffb[x];
+			select {
+				case buttonListener :> temp:
+					if (temp == BTN_STOP) {
+#ifdef DBGPRT
+						printf("Button Stop\n");
+#endif
+						shutdown = 1;
+						x = IMWD;
+					} else if (temp == BTN_PAUSE) {
+#ifdef DBGPRT
+						printf("Button Paused\n");
+#endif
+						while (temp != BTN_RES) {
+							buttonListener :> temp;
+						}
+					}
+					break;
+				case c_in :> buffb[x]:
+					break;
+				default:
+					break;
+			}
 		}
 
 		for (workRemaining = NSLICE; workRemaining >= 1; workRemaining--) {
@@ -592,7 +619,7 @@ void DataOutStream(char outfname[], char fileBuffA[], char fileBuffB[], chanend 
 }
 
 // TODO: Reduce blocking on collector.
-void collector(chanend fromWorker[], chanend dataOut, chanend toVis, chanend toTimer){
+void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 	uchar tmp;
 	int i, j, x, cWorker, pc, cTotal, idBuff[WORKERNO], sliceLen, working;
 
@@ -667,7 +694,7 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis, chanend toT
 #endif
 	}
 
-    toTimer <: 1;
+    //toTimer <: 1;
 
 	// Wait until all workers are dead before sepuku
 	for (i = 0; i < WORKERNO; i++) {
@@ -738,16 +765,16 @@ void buttonListener(in port buttons, chanend toDistributor) {
 
 //MAIN PROCESS defining channels, orchestrating and starting the threads
 int main() {
-    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], toVis, quad0, quad1, quad2, quad3, bListener, fLoop, dTimer, cTimer;
+    chan c_inIO, c_outIO, fromWorker[WORKERNO], toWorker[WORKERNO], toVis, quad0, quad1, quad2, quad3, bListener, fLoop;
 
     par
     {
     	on stdcore[0]: DataInStream( IMAGE, FILEBUFFA, FILEBUFFB, c_inIO, fLoop );
         on stdcore[0]: buttonListener(buttons, bListener);
         on stdcore[0]: DataOutStream( IMAGE_OUT, FILEBUFFA, FILEBUFFB, c_outIO, fLoop );
-        on stdcore[1]: distributor( toWorker, c_inIO, bListener, dTimer);
-        on stdcore[2]: collector(fromWorker, c_outIO, toVis, cTimer);
-        on stdcore[3]: time(dTimer, cTimer);
+        on stdcore[1]: distributor( toWorker, c_inIO, bListener);
+        on stdcore[2]: collector(fromWorker, c_outIO, toVis);
+        //on stdcore[3]: time(dTimer, cTimer);
 		on stdcore[0]: visualiser(toVis,quad0,quad1,quad2,quad3);
 		on stdcore[0]: showLED(cled0,quad0);
 		on stdcore[1]: showLED(cled1,quad1);
