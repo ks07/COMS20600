@@ -21,4 +21,5 @@
 .metadata
 bin/
 .build_Debug/
+.build_Release/
 .settings/
