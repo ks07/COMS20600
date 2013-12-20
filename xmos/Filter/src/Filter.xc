@@ -298,6 +298,7 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener, chane
     uchar buffa[IMWD], buffb[IMWD], tmp;
     //Blocking till button A is pressed
     buttonListener :> temp;
+    printf("Starting blur of %s (%d x %dpx) %d time(s).\n", IMAGE, IMWD, IMHT, ROUNDS);
     toTimer <: temp;
     cWorker = 0;
     shutdown = 0;
@@ -477,7 +478,6 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 				if ((y == 1 && (pos & N)) || (x == 0) || (y == height && (pos & S)) || (x == width - 1)) {
 					temp = BLACK;
 				} else {
-					//temp = block[ind(x,y,width)];
 					temp = (block[ind(x,y,width)] + block[ind(x+1,y,width)] + block[ind(x-1,y,width)] + block[ind(x,y-1,width)] + block[ind(x,y+1,width)] + block[ind(x-1,y-1,width)] + block[ind(x-1,y+1,width)] + block[ind(x+1,y-1,width)] + block[ind(x+1,y+1,width)]) / 9;
 				}
 				toCollector <: temp;
