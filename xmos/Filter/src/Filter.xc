@@ -21,7 +21,7 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define ROUNDS 50
+#define ROUNDS 5
 
 #define IMAGE "src/test0.pgm"
 //#define IMAGE "src/BristolCathedral.pgm"
@@ -255,6 +255,13 @@ void DataInStream(char infname[], char filebuffa[], char filebuffb[], chanend c_
 						x = IMWD;
 						round = ROUNDS;
 						break;
+					case loop :> res:
+						if (res == -1) {
+							y = IMHT;
+							x = IMWD;
+							round = ROUNDS;
+						}
+					break;
 					default:
 						c_out <: line[ x ];
 						break;
@@ -265,11 +272,8 @@ void DataInStream(char infname[], char filebuffa[], char filebuffb[], chanend c_
     _closeinpgm();
     }
 
-    select {
-    	case c_out :> res:
-    		break;
-    	case loop :> res:
-    		break;
+    while (res != -1) {
+    	loop :> res;
     }
 
 #ifdef DBGPRT
@@ -363,6 +367,7 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener) {
 
 			if (shutdown) {
 				workRemaining = 0; // Set workRemaining so we don't try to continue.
+				round = ROUNDS;
 			} else {
 				cWorker = getWaiting(toWorker, cWorker);
 #ifdef DBGPRT
@@ -603,7 +608,7 @@ void DataOutStream(char outfname[], char fileBuffA[], char fileBuffB[], chanend 
 		}
 
 		_closeoutpgm();
-		loop <: 0;
+		loop <: -1;
     }
 #ifdef DBGPRT
     printf( "DataOutStream: Done...\n" );
@@ -661,6 +666,7 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis){
 				}
 				if (cTotal == -4) {
 					working = 0;
+					round = ROUNDS;
 				}
 			}
 
