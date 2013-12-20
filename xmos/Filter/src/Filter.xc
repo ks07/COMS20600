@@ -10,6 +10,7 @@ typedef unsigned char uchar;
 
 #include <platform.h>
 #include <stdio.h>
+#include <limits.h>
 #include "pgmIO.h"
 
 in port buttons = PORT_BUTTON;
@@ -61,62 +62,39 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define LED_STEP_SLICES (NSLICE + 1) * ROUNDS / 12
 //#define DBGPRT
 
+#define OVERFLOW_LIM (UINT_MAX - 7295)
+
 // Timing for the system
 void time(chanend fromDistributor, chanend fromCollector) {
     timer tmr;
-    unsigned int startTime, endTime, collectTime, oldTime, overallTime, oldOverallTime, overflowCount;
-    int temp, x;
-    x = 1;
-    fromDistributor :> temp;
-    tmr :> startTime;
-    startTime = startTime;
-    oldTime = startTime;
-    overflowCount = 0;
-    overallTime = 0;
-    oldOverallTime = 0;
-    while (x) {
-        select {
-            case tmr :> collectTime:
-//                printf("collectTime = %d oldTime = %d overallTime = %d oldOverallTime = %d\n", collectTime, oldTime, overallTime, oldOverallTime);
-                if (collectTime > oldTime && overallTime >= oldOverallTime) {
-                    overallTime = overallTime + collectTime - oldTime;
-//                    printf("Yay\n");
-                } else if (overallTime < oldOverallTime) {
-                    overflowCount++;
-//                    overallTime = overallTime + collectTime - oldTime;
-                } else {
-                    printf("Overflow\n");
-                    overallTime = overallTime + collectTime;
-                }
-                oldOverallTime = overallTime;
-                oldTime = collectTime;
-                break;
-            default:
-                 break;
-        }
-        select {
-            case fromCollector :> temp:
-                 tmr :> endTime;
-                if (endTime > oldTime && overallTime > oldOverallTime) {
-                    overallTime = overallTime + endTime - oldTime;
-                } else if (overallTime <= oldOverallTime){
-                    overflowCount++;
-//                    overallTime = overallTime + collectTime - oldTime;
-                } else {
-                    overallTime = overallTime + endTime;
-                }
-                x = 0;
-                break;
-            default:
-                break;
-        }
-//        printf("overallTime = %d oldOverallTime = %d\n", overallTime, oldOverallTime);
+    unsigned int startTime, totalTime, t, wrapCount;
+    int tmp;
+    int running = 1;
+    wrapCount = 0;
+
+    fromDistributor :> tmp; // Block on distributor, it will message us when it starts.
+    tmr :> startTime; // Read the time from the timer at the start.
+
+    // There is a (very real) danger of overflow in the timer. We should wait until we're told to stop, or we're about to go over.
+    while (running) {
+		select {
+			case fromCollector :> tmp:
+				// Abandon ship!
+				tmr :> t;
+				running = 0;
+				break;
+			case tmr when timerafter(OVERFLOW_LIM) :> t:
+				// Timer is about to wrap around, we should keep a count of how many times this has happened.
+				wrapCount++;
+				break;
+		}
     }
-    printf("overflow count = %u\n", overflowCount);
-    printf("overallTime = %u\n", overallTime);
-    overallTime = overallTime / 100000;
-    overallTime = overflowCount * 42949 + overallTime;
-    printf("Overall time running was %ums\n", overallTime);
+
+    if (wrapCount > 0) {
+    	printf("Final runtime: %u times %u plus initial run of %u and final run of %u\n", wrapCount, OVERFLOW_LIM, OVERFLOW_LIM - startTime, t);
+    } else {
+		printf("Final runtime: Initial run of %u\n", t - startTime);
+    }
 }
 
 //DISPLAYS an LED pattern in one quadrant of the clock LEDs
@@ -324,7 +302,7 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener, chane
     //Blocking till button A is pressed
     buttonListener :> temp;
     printf("Starting blur of %s (%d x %dpx) %d time(s).\n", IMAGE, IMWD, IMHT, ROUNDS);
-    toTimer <: temp;
+    toTimer <: 1;
     cWorker = 0;
     shutdown = 0;
 
@@ -689,6 +667,8 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis, chanend toT
 #endif
 	}
 
+    toTimer <: 1;
+
 	// Wait until all workers are dead before sepuku
 	for (i = 0; i < WORKERNO; i++) {
 		while (idBuff[i] != -1) {
@@ -697,7 +677,6 @@ void collector(chanend fromWorker[], chanend dataOut, chanend toVis, chanend toT
 	}
 
 	// Tell vis we are thankful for it's assistance and wish it a merry christmas
-    toTimer <: 1;
 	toVis <: -1;
 
 #ifdef DBGPRT
