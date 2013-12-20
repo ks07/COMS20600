@@ -20,16 +20,16 @@ out port cled3 = PORT_CLOCKLED_3;
 out port cledG = PORT_CLOCKLED_SELG;
 out port cledR = PORT_CLOCKLED_SELR;
 
-#define ROUNDS 1
+#define ROUNDS 20
 
-#define IMAGE "src/test0.pgm"
-//#define IMAGE "src/BristolCathedral.pgm"
+//#define IMAGE "src/test0.pgm"
+#define IMAGE "src/BristolCathedral.pgm"
 //#define IMAGE "src/spaceship.pgm"
 #define IMAGE_OUT "bin/testout.pgm"
 #define FILEBUFFA "bin/tmpa.pgm"
 #define FILEBUFFB "bin/tmpb.pgm"
-#define IMWD 16
-#define IMHT 16
+#define IMWD 400
+#define IMHT 256
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -59,7 +59,7 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define LED_STOP 15
 
 #define LED_STEP_SLICES (NSLICE + 1) * ROUNDS / 12
-#define DBGPRT
+//#define DBGPRT
 
 // Timing for the system
 void time(chanend fromDistributor, chanend fromCollector) {
