@@ -22,13 +22,14 @@ out port cledR = PORT_CLOCKLED_SELR;
 
 #define ROUNDS 1
 
-//#define IMAGE "src/test0.pgm"
-#define IMAGE "src/BristolCathedral.pgm"
+#define IMAGE "src/test0.pgm"
+//#define IMAGE "src/BristolCathedral.pgm"
+//#define IMAGE "src/spaceship.pgm"
 #define IMAGE_OUT "bin/testout.pgm"
 #define FILEBUFFA "bin/tmpa.pgm"
 #define FILEBUFFB "bin/tmpb.pgm"
-#define IMHT 256
-#define IMWD 400
+#define IMWD 16
+#define IMHT 16
 
 // USE CONSTANTS FOR BIT-FIELD OF WORKER QUADRANT POSITION
 // NE = N & E
@@ -58,7 +59,7 @@ out port cledR = PORT_CLOCKLED_SELR;
 #define LED_STOP 15
 
 #define LED_STEP_SLICES (NSLICE + 1) * ROUNDS / 12
-//#define DBGPRT
+#define DBGPRT
 
 // Timing for the system
 void time(chanend fromDistributor, chanend fromCollector) {
@@ -161,6 +162,8 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 	int progress = 0;
 	int lCnt, sCnt, perStep;
 	int lights[] = {0,1,2,3,4,5,6,7,8,9,10,11};
+	timer tmr;
+	unsigned int t;
 	lCnt = 0;
 	sCnt = 0;
 
@@ -203,6 +206,8 @@ void visualiser(chanend fromCollector, chanend toQuadrant0, chanend toQuadrant1,
 	cledG <: 0;
 	cledR <: 1;
 	showPattern(lights, 12, toQuadrant0, toQuadrant1, toQuadrant2, toQuadrant3);
+	tmr :> t;
+	tmr when timerafter(t + 5000000) :> void;
 
 	cledG <: 0;
 	cledR <: 0;
@@ -301,7 +306,7 @@ int getWaiting(chanend workers[], int last) {
                     waiting = i;
                 } else {
 #ifdef DBGPRT
-                    printf("ISSUES\n");
+                    printf("Accidentally pulling data from worker!\n");
 #endif
                 }
                 break;
@@ -318,6 +323,7 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener, chane
     uchar buffa[IMWD], buffb[IMWD], tmp;
     //Blocking till button A is pressed
     buttonListener :> temp;
+    printf("Starting blur of %s (%d x %dpx) %d time(s).\n", IMAGE, IMWD, IMHT, ROUNDS);
     toTimer <: temp;
     cWorker = 0;
     shutdown = 0;
@@ -424,7 +430,9 @@ void distributor(chanend toWorker[], chanend c_in, chanend buttonListener, chane
 			}
 			c_in <: 0;
 		}
+#ifdef DBGPRT
 		printf("Distributor: Done round %d\n", round);
+#endif
     }// Round finish
 
 
@@ -466,6 +474,7 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 	unsigned int x, y, i;
 	uchar temp;
 	uchar block[BLOCKSIZE];
+	uchar resBuff[IMWD][SLICEH]; // Smaller buffer to hold results
 
 	fromDistributor <: WORKER_RDY;
 	fromDistributor :> sliceNo;
@@ -487,7 +496,7 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 #endif
 		toCollector <: sliceNo;
 		toCollector <: height * IMWD;
-		// TODO: width needs a buffer either side
+
 		DBGSENT = 0;
 		// Start one pixel in in either direction.
 		for (y = 1; y <= height; y++) {
@@ -495,18 +504,31 @@ void worker(int id, chanend fromDistributor, chanend toCollector) {
 				if ((y == 1 && (pos & N)) || (x == 0) || (y == height && (pos & S)) || (x == width - 1)) {
 					temp = BLACK;
 				} else {
-					//temp = block[ind(x,y,width)];
 					temp = (block[ind(x,y,width)] + block[ind(x+1,y,width)] + block[ind(x-1,y,width)] + block[ind(x,y-1,width)] + block[ind(x,y+1,width)] + block[ind(x-1,y-1,width)] + block[ind(x-1,y+1,width)] + block[ind(x+1,y-1,width)] + block[ind(x+1,y+1,width)]) / 9;
 				}
-				toCollector <: temp;
+				resBuff[x][y-1] = temp;
+				//toCollector <: temp;
 				DBGSENT++;
 			}
 		}
 
 #ifdef DBGPRT
-		printf("[%d] done slice, sent %d to collector.\n", id, DBGSENT);
+		printf("[%d] done slice, processed %dpx.\n", id, DBGSENT);
 #endif
 
+		// Start sending results as soon as possible.
+		for (y = 0; y < height; y++) {
+			for (x = 0; x < width; x++) {
+				toCollector <: resBuff[x][y];
+			}
+		}
+
+#ifdef DBGPRT
+		printf("[%d] slice sent to collector.\n", id, DBGSENT);
+#endif
+
+		// We could possibly interleave sending/waiting to send to the collector with receiving data from distributor.
+		// The only issue being we may distribute chunks in a biased fashion, which could hurt performance.
 		fromDistributor <: WORKER_RDY;
 		fromDistributor :> sliceNo;
 		fromDistributor :> width;
